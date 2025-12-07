@@ -63,7 +63,7 @@ export default function Strategies() {
         .select('*');
       if (stratError) throw stratError;
 
-      // 2. Fetch All Trades (needed for accurate aggregation)
+      // 2. Fetch All Trades
       const { data: tradesData, error: tradesError } = await supabase
         .from('trades')
         .select('*');
@@ -85,41 +85,35 @@ export default function Strategies() {
         let win_count = 0;
         let loss_count = 0;
 
-        // Group trades to estimate wins/losses (simplified by trade grouping if possible, otherwise by line item P&L for realized)
-        // For P&L, we iterate:
         stratTrades.forEach(trade => {
-            // Cash Flow
-            const amount = Number(trade.amount);
+            // Recalculate Amount Logic
+            const actionUpper = trade.action.toUpperCase();
+            const isSell = actionUpper.includes('SELL') || actionUpper.includes('SHORT');
+            const sign = isSell ? 1 : -1;
             
-            // Market Value Calculation
-            let marketValue = 0;
+            const grossAmount = trade.price * trade.quantity * trade.multiplier * sign;
+            const netAmount = grossAmount - (trade.fees || 0);
+
+            // Open Position Logic
             if (trade.mark_price !== null) {
-                const mark = Math.abs(Number(trade.mark_price));
-                const qty = Number(trade.quantity);
-                const mult = Number(trade.multiplier);
+                const cleanMarkPrice = Math.abs(Number(trade.mark_price));
+                const posSign = isSell ? -1 : 1;
                 
-                // Determine sign: Long = +1, Short = -1
-                // Standard logic: Buy adds positive asset value, Sell adds negative liability value
-                const isShort = trade.action.toUpperCase().includes('SELL') || trade.action.toUpperCase().includes('SHORT');
-                const sign = isShort ? -1 : 1;
+                const marketValue = cleanMarkPrice * trade.quantity * trade.multiplier * posSign;
+                const tradeUnrealized = marketValue + netAmount;
                 
-                marketValue = mark * qty * mult * sign;
-                
-                // Unrealized P&L for this specific trade = Current Value + Cost (Amount is usually negative for buys)
-                const tradeUnrealized = marketValue + amount;
                 unrealized_pnl += tradeUnrealized;
+                total_pnl += tradeUnrealized;
             } else {
-                // If no mark price, it's considered closed/realized
-                realized_pnl += amount;
+                // Closed Position Logic
+                realized_pnl += netAmount;
+                total_pnl += netAmount;
                 
-                // Estimate Win/Loss on realized trades
-                if (amount > 0) win_count++;
-                if (amount < 0) loss_count++;
+                // Estimate Win/Loss
+                if (netAmount > 0) win_count++;
+                if (netAmount < 0) loss_count++;
             }
         });
-
-        // Total P&L = Realized + Unrealized
-        total_pnl = realized_pnl + unrealized_pnl;
 
         const strategyTags = dashboardTagsData?.filter(t => t.strategy_id === strategy.id) || [];
 
@@ -146,8 +140,7 @@ export default function Strategies() {
   const activeStrategies = strategies?.filter(s => s.status === 'active' && !s.is_hidden) || [];
   const closedStrategies = strategies?.filter(s => s.status === 'closed' && !s.is_hidden) || [];
 
-  // --- Mutations ---
-
+  // --- Mutations (Rest of file unchanged, just re-exporting component logic) ---
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -207,7 +200,6 @@ export default function Strategies() {
   });
 
   // --- Handlers ---
-
   const handleCreate = () => {
     if (!formData.name) return showError("Name is required");
     createMutation.mutate(formData);
@@ -228,8 +220,6 @@ export default function Strategies() {
     setIsEditOpen(true);
   };
 
-  // --- Render Helpers ---
-
   const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { 
     style: 'currency', 
     currency: 'USD',
@@ -243,7 +233,6 @@ export default function Strategies() {
       ? (strategy.total_pnl / strategy.capital_allocation) * 100 
       : 0;
     
-    // Win rate approximation
     const totalClosed = strategy.win_count + strategy.loss_count;
     const winRate = totalClosed > 0
       ? (strategy.win_count / totalClosed) * 100
@@ -298,7 +287,6 @@ export default function Strategies() {
         </CardHeader>
         
         <CardContent className="flex-1 pb-4 space-y-4">
-          {/* Main P&L Display */}
           <div className="bg-gradient-to-br from-muted/50 to-muted/20 rounded-lg p-4">
             <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
               <DollarSign className="h-3 w-3" />
@@ -316,7 +304,6 @@ export default function Strategies() {
             </div>
           </div>
 
-          {/* Metrics Grid */}
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="bg-muted/30 p-3 rounded-md">
               <span className="text-muted-foreground block text-xs mb-1">Realized P&L</span>
@@ -346,7 +333,6 @@ export default function Strategies() {
             </div>
           </div>
 
-          {/* Tag Breakdown */}
           {strategy.dashboard_tags && strategy.dashboard_tags.length > 0 && (
             <div className="bg-muted/30 rounded-lg p-3 space-y-2">
               <div className="text-xs font-medium text-muted-foreground flex items-center gap-1">
@@ -392,7 +378,6 @@ export default function Strategies() {
           </Button>
         </div>
 
-        {/* Create Dialog */}
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
           <DialogContent>
             <DialogHeader>
@@ -422,7 +407,6 @@ export default function Strategies() {
           </DialogContent>
         </Dialog>
 
-        {/* Edit Dialog */}
         <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
           <DialogContent>
             <DialogHeader>
@@ -460,7 +444,6 @@ export default function Strategies() {
           </div>
         ) : (
           <>
-            {/* Active Strategies Section */}
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-5 w-5 text-primary" />

@@ -12,11 +12,11 @@ const Index = () => {
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboard-stats-v2'],
     queryFn: async () => {
-      // 1. Fetch all non-hidden trades with necessary columns for valuation
+      // 1. Fetch all non-hidden trades
       const { data: trades, error } = await supabase
         .from('trades')
         .select('*')
-        .eq('hidden', false) // Exclude hidden trades
+        .eq('hidden', false)
         .order('date', { ascending: true });
       
       if (error) throw error;
@@ -30,41 +30,39 @@ const Index = () => {
 
       // Calculate Metrics
       trades.forEach(trade => {
-        const amount = Number(trade.amount);
+        // Recalculate Amount Logic
+        const actionUpper = trade.action.toUpperCase();
+        const isSell = actionUpper.includes('SELL') || actionUpper.includes('SHORT');
+        const sign = isSell ? 1 : -1;
         
-        // Handle Open Positions (Unrealized P&L)
-        if (trade.mark_price !== null) {
-          const mark = Math.abs(Number(trade.mark_price));
-          const qty = Number(trade.quantity);
-          const mult = Number(trade.multiplier);
-          
-          // Sign Logic: Short (Sell) = -1, Long (Buy) = +1
-          const isShort = trade.action.toUpperCase().includes('SELL') || trade.action.toUpperCase().includes('SHORT');
-          const sign = isShort ? -1 : 1;
-          
-          const marketValue = mark * qty * mult * sign;
-          
-          // For open trades, P&L = Current Value + Cost Basis (Amount)
-          totalPnL += (marketValue + amount);
-          unrealizedPnL += (marketValue + amount);
-        } else {
-          // Closed/Realized Trades
-          totalPnL += amount;
-          realizedPnL += amount;
+        const grossAmount = trade.price * trade.quantity * trade.multiplier * sign;
+        const netAmount = grossAmount - (trade.fees || 0);
 
-          // Win Rate Logic (Approximate based on realized transaction P&L)
-          if (trade.action.toUpperCase().includes('CLOSE') || trade.action.toUpperCase().includes('EXP')) {
+        if (trade.mark_price !== null) {
+          // Open Logic
+          const cleanMarkPrice = Math.abs(Number(trade.mark_price));
+          const posSign = isSell ? -1 : 1;
+          
+          const marketValue = cleanMarkPrice * trade.quantity * trade.multiplier * posSign;
+          const tradeUnrealized = marketValue + netAmount;
+          
+          totalPnL += tradeUnrealized;
+          unrealizedPnL += tradeUnrealized;
+        } else {
+          // Closed Logic
+          totalPnL += netAmount;
+          realizedPnL += netAmount;
+
+          if (actionUpper.includes('CLOSE') || actionUpper.includes('EXP')) {
              closeCount++;
-             if (amount > 0) winCount++;
-             else if (amount < 0) lossCount++;
+             if (netAmount > 0) winCount++;
+             else if (netAmount < 0) lossCount++;
           }
         }
       });
 
-      // Basic heuristic for open positions count
       const openCount = trades.filter(t => t.mark_price !== null).length;
       
-      // Calculate Win Rate based on closed transactions
       const winRate = closeCount > 0 
         ? Math.round((winCount / closeCount) * 100) 
         : 0;
@@ -76,7 +74,7 @@ const Index = () => {
         activePositions: openCount,
         winRate,
         tradeCount: trades.length,
-        trades: trades // Pass trades to chart
+        trades: trades
       };
     }
   });
@@ -109,7 +107,6 @@ const Index = () => {
           </div>
         </div>
 
-        {/* Key Metrics Grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -160,7 +157,6 @@ const Index = () => {
           </Card>
         </div>
 
-        {/* Charts Section */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
           <Card className="col-span-4 lg:col-span-7">
             <CardHeader>
