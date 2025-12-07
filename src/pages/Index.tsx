@@ -6,28 +6,30 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
+import { DashboardChart } from "@/components/DashboardChart";
 
 const Index = () => {
   const { data: stats, isLoading } = useQuery({
     queryKey: ['dashboard-stats'],
     queryFn: async () => {
       // 1. Fetch all trades to calculate metrics
+      // Note: We could use a VIEW for this too if it gets heavy, but for charts we need the raw data points anyway
       const { data: trades, error } = await supabase
         .from('trades')
-        .select('amount, action, quantity');
+        .select('amount, action, quantity, date')
+        .order('date', { ascending: true });
       
       if (error) throw error;
 
       // Calculate Total P&L
       const totalPnL = trades.reduce((acc, t) => acc + Number(t.amount), 0);
       
-      // Basic heuristic for open positions (not perfect without linking, but gives an idea of activity)
+      // Basic heuristic for open positions
       const openCount = trades.filter(t => t.action.includes('OPEN')).length;
       const closeCount = trades.filter(t => t.action.includes('CLOSE')).length;
       const activePositionsEstimate = Math.max(0, openCount - closeCount);
       
-      // Calculate Win Rate (based on positive trades)
-      // Note: This is trade-level, not strategy-level, which is a rough approximation
+      // Calculate Win Rate
       const closedTrades = trades.filter(t => t.action.includes('CLOSE'));
       const winningTrades = closedTrades.filter(t => Number(t.amount) > 0);
       const winRate = closedTrades.length > 0 
@@ -38,7 +40,8 @@ const Index = () => {
         totalPnL,
         activePositions: activePositionsEstimate,
         winRate,
-        tradeCount: trades.length
+        tradeCount: trades.length,
+        trades: trades // Pass trades to chart
       };
     }
   });
@@ -124,37 +127,12 @@ const Index = () => {
 
         {/* Charts Section */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-          <Card className="col-span-4">
+          <Card className="col-span-4 lg:col-span-7">
             <CardHeader>
-              <CardTitle>Recent Activity</CardTitle>
+              <CardTitle>P&L Performance</CardTitle>
             </CardHeader>
-            <CardContent>
-               <div className="space-y-4">
-                 {/* Simple recent list here since we have the data */}
-                 <div className="flex h-[200px] items-center justify-center text-muted-foreground border border-dashed rounded-md bg-muted/5">
-                   Chart visualization coming soon
-                 </div>
-               </div>
-            </CardContent>
-          </Card>
-          
-          <Card className="col-span-3">
-            <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-               <Link to="/import" className="block p-4 border rounded-lg hover:bg-muted/50 transition-colors">
-                 <h4 className="font-semibold flex items-center gap-2">
-                   <DollarSign className="h-4 w-4" /> Import Trades
-                 </h4>
-                 <p className="text-sm text-muted-foreground mt-1">Upload CSV from your broker</p>
-               </Link>
-               <Link to="/strategies" className="block p-4 border rounded-lg hover:bg-muted/50 transition-colors">
-                 <h4 className="font-semibold flex items-center gap-2">
-                   <Target className="h-4 w-4" /> Create Strategy
-                 </h4>
-                 <p className="text-sm text-muted-foreground mt-1">Group trades into positions</p>
-               </Link>
+            <CardContent className="pl-0">
+               <DashboardChart trades={stats?.trades || []} />
             </CardContent>
           </Card>
         </div>

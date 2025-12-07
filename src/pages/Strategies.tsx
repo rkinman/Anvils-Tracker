@@ -25,40 +25,17 @@ export default function Strategies() {
   const [newStrategy, setNewStrategy] = useState({ name: "", description: "" });
   const queryClient = useQueryClient();
 
-  // Fetch strategies with their trade stats
+  // Fetch strategies using the efficient View
   const { data: strategies, isLoading } = useQuery({
     queryKey: ['strategies'],
     queryFn: async () => {
-      // Get strategies
-      const { data: strategiesData, error: strategiesError } = await supabase
-        .from('strategies')
+      const { data, error } = await supabase
+        .from('strategy_performance')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('total_pnl', { ascending: false });
 
-      if (strategiesError) throw strategiesError;
-
-      // Get trade aggregates per strategy
-      // Note: In a larger app, we'd use a database view or RPC for this
-      const { data: tradesData, error: tradesError } = await supabase
-        .from('trades')
-        .select('strategy_id, amount, action');
-
-      if (tradesError) throw tradesError;
-
-      // Combine data
-      return strategiesData.map(strategy => {
-        const strategyTrades = tradesData.filter(t => t.strategy_id === strategy.id);
-        const totalPnL = strategyTrades.reduce((sum, t) => sum + Number(t.amount), 0);
-        const tradeCount = strategyTrades.length;
-        const isOpen = strategyTrades.length > 0 && !strategyTrades.every(t => t.action.includes('CLOSE') || t.action.includes('EXPIRE'));
-        
-        return {
-          ...strategy,
-          totalPnL,
-          tradeCount,
-          status: isOpen ? 'Open' : 'Closed'
-        };
-      });
+      if (error) throw error;
+      return data;
     }
   });
 
@@ -178,7 +155,7 @@ export default function Strategies() {
                         {strategy.description || "No description"}
                       </CardDescription>
                     </div>
-                    {strategy.totalPnL >= 0 ? (
+                    {strategy.total_pnl >= 0 ? (
                       <TrendingUp className="h-5 w-5 text-green-500" />
                     ) : (
                       <TrendingDown className="h-5 w-5 text-red-500" />
@@ -189,20 +166,21 @@ export default function Strategies() {
                   <div className="grid grid-cols-2 gap-4 mt-2">
                     <div>
                       <p className="text-xs text-muted-foreground">Net P&L</p>
-                      <p className={`text-xl font-bold ${strategy.totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(strategy.totalPnL)}
+                      <p className={`text-xl font-bold ${strategy.total_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(strategy.total_pnl)}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Trades</p>
-                      <p className="text-xl font-bold">{strategy.tradeCount}</p>
+                      <p className="text-xl font-bold">{strategy.trade_count}</p>
                     </div>
                   </div>
                 </CardContent>
                 <CardFooter className="pt-4 border-t flex justify-between">
                    <div className="flex gap-2">
-                      {/* Placeholder for status logic */}
-                      <Badge variant="secondary">{strategy.status}</Badge>
+                      <Badge variant="secondary">
+                        {strategy.win_count}W / {strategy.loss_count}L
+                      </Badge>
                    </div>
                    <div className="flex gap-2">
                      <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => {
@@ -211,9 +189,6 @@ export default function Strategies() {
                         }
                      }}>
                         <Trash2 className="h-4 w-4" />
-                     </Button>
-                     <Button variant="ghost" size="icon">
-                        <ArrowRight className="h-4 w-4" />
                      </Button>
                    </div>
                 </CardFooter>

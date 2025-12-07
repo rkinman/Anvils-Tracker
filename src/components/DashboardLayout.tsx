@@ -14,6 +14,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { MadeWithDyad } from "./made-with-dyad";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -100,6 +101,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <LogOut className="h-5 w-5" />
               Sign Out
             </Button>
+            <MadeWithDyad />
           </div>
         </div>
       </aside>
