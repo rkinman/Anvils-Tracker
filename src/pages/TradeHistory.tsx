@@ -20,16 +20,40 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, Filter, Loader2 } from "lucide-react";
+import { Search, Filter, Loader2, Link as LinkIcon, Unlink, Checkbox as CheckboxIcon } from "lucide-react";
 import { format } from "date-fns";
 import { showSuccess, showError } from "@/utils/toast";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
+// Define Trade type based on Supabase schema
+interface Trade {
+  id: string;
+  user_id: string;
+  strategy_id: string | null;
+  pair_id: string | null;
+  symbol: string;
+  date: string;
+  action: string;
+  quantity: number;
+  price: number;
+  fees: number;
+  amount: number;
+  multiplier: number;
+  asset_type: string;
+  notes: string | null;
+  import_hash: string | null;
+  created_at: string;
+  strategies: { id: string; name: string } | null;
+}
 
 export default function TradeHistory() {
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedTrades, setSelectedTrades] = useState<string[]>([]);
   const queryClient = useQueryClient();
 
   // Fetch Trades
-  const { data: trades, isLoading: tradesLoading } = useQuery({
+  const { data: trades, isLoading: tradesLoading } = useQuery<Trade[]>({
     queryKey: ['trades'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -44,7 +68,7 @@ export default function TradeHistory() {
         .order('date', { ascending: false });
       
       if (error) throw error;
-      return data;
+      return data as Trade[];
     }
   });
 
@@ -61,6 +85,8 @@ export default function TradeHistory() {
     }
   });
 
+  // --- Mutations ---
+
   // Mutation to update strategy
   const updateStrategyMutation = useMutation({
     mutationFn: async ({ tradeId, strategyId }: { tradeId: string, strategyId: string | null }) => {
@@ -73,7 +99,7 @@ export default function TradeHistory() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trades'] });
-      queryClient.invalidateQueries({ queryKey: ['strategies'] }); // Refresh strategy stats too
+      queryClient.invalidateQueries({ queryKey: ['strategies'] });
       showSuccess("Trade updated");
     },
     onError: (err) => {
@@ -81,15 +107,97 @@ export default function TradeHistory() {
     }
   });
 
+  // Mutation for pairing trades
+  const pairTradesMutation = useMutation({
+    mutationFn: async (tradeIds: string[]) => {
+      if (tradeIds.length < 2) {
+        throw new Error("Select at least two trades to pair.");
+      }
+      
+      // Generate a new UUID for the pair
+      const pairId = crypto.randomUUID();
+
+      const { error } = await supabase
+        .from('trades')
+        .update({ pair_id: pairId })
+        .in('id', tradeIds);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['trades'] });
+      setSelectedTrades([]);
+      showSuccess(`Successfully paired ${selectedTrades.length} trades.`);
+    },
+    onError: (err) => {
+      showError(err.message);
+    }
+  });
+
+  // Mutation for unpairing trades
+  const unpairTradesMutation = useMutation({
+    mutationFn: async (tradeIds: string[]) => {
+      const { error } = await supabase
+        .from('trades')
+        .update({ pair_id: null })
+        .in('id', tradeIds);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['trades'] });
+      setSelectedTrades([]);
+      showSuccess(`Successfully unpaired ${selectedTrades.length} trades.`);
+    },
+    onError: (err) => {
+      showError(err.message);
+    }
+  });
+
+  // --- Handlers ---
+
   const handleStrategyChange = (tradeId: string, value: string) => {
     const strategyId = value === "none" ? null : value;
     updateStrategyMutation.mutate({ tradeId, strategyId });
   };
 
+  const handleSelectTrade = (tradeId: string, checked: boolean) => {
+    setSelectedTrades(prev => 
+      checked ? [...prev, tradeId] : prev.filter(id => id !== tradeId)
+    );
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (!filteredTrades) return;
+    if (checked) {
+      setSelectedTrades(filteredTrades.map(t => t.id));
+    } else {
+      setSelectedTrades([]);
+    }
+  };
+
+  const handleBulkPair = () => {
+    if (selectedTrades.length < 2) {
+      showError("Please select at least two trades to pair.");
+      return;
+    }
+    pairTradesMutation.mutate(selectedTrades);
+  };
+
+  const handleBulkUnpair = () => {
+    if (selectedTrades.length === 0) return;
+    unpairTradesMutation.mutate(selectedTrades);
+  };
+
+  // --- Filtering ---
+
   const filteredTrades = trades?.filter(trade => 
     trade.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
     trade.action.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const allSelected = filteredTrades && selectedTrades.length > 0 && selectedTrades.length === filteredTrades.length;
+  const indeterminate = selectedTrades.length > 0 && selectedTrades.length < (filteredTrades?.length || 0);
 
   return (
     <DashboardLayout>
@@ -99,7 +207,7 @@ export default function TradeHistory() {
           <p className="text-muted-foreground">View all transactions and assign them to strategies.</p>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between gap-4">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -110,15 +218,44 @@ export default function TradeHistory() {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <Button variant="outline">
-            <Filter className="mr-2 h-4 w-4" /> Filter
-          </Button>
+          
+          {selectedTrades.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="secondary">
+                  Bulk Actions ({selectedTrades.length})
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem 
+                  onClick={handleBulkPair} 
+                  disabled={pairTradesMutation.isPending}
+                >
+                  <LinkIcon className="mr-2 h-4 w-4" /> Pair Selected Trades
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={handleBulkUnpair} 
+                  disabled={unpairTradesMutation.isPending}
+                >
+                  <Unlink className="mr-2 h-4 w-4" /> Unpair Selected Trades
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
-        <div className="border rounded-md bg-card">
+        <div className="border rounded-md bg-card overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-[40px]">
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={handleSelectAll}
+                    aria-label="Select all"
+                    className="translate-y-[2px]"
+                  />
+                </TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Symbol</TableHead>
                 <TableHead>Action</TableHead>
@@ -126,25 +263,33 @@ export default function TradeHistory() {
                 <TableHead className="text-right">Price</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
                 <TableHead>Strategy</TableHead>
+                <TableHead>Pair ID</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {tradesLoading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-10">
+                  <TableCell colSpan={9} className="text-center py-10">
                     <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                   </TableCell>
                 </TableRow>
               ) : filteredTrades?.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
                     No trades found. Import some data to get started.
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredTrades?.map((trade) => (
-                  <TableRow key={trade.id}>
-                    <TableCell className="font-medium">
+                  <TableRow key={trade.id} className={trade.pair_id ? "bg-primary/5" : ""}>
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedTrades.includes(trade.id)}
+                        onCheckedChange={(checked) => handleSelectTrade(trade.id, !!checked)}
+                        aria-label={`Select trade ${trade.id}`}
+                      />
+                    </TableCell>
+                    <TableCell className="font-medium min-w-[120px]">
                       {format(new Date(trade.date), 'MMM d, yyyy')}
                     </TableCell>
                     <TableCell>
@@ -166,12 +311,13 @@ export default function TradeHistory() {
                     }`}>
                       {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(trade.amount)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="min-w-[200px]">
                       <Select 
                         defaultValue={trade.strategy_id || "none"} 
                         onValueChange={(val) => handleStrategyChange(trade.id, val)}
+                        disabled={updateStrategyMutation.isPending}
                       >
-                        <SelectTrigger className="w-[180px] h-8">
+                        <SelectTrigger className="w-full h-8">
                           <SelectValue placeholder="Assign Strategy" />
                         </SelectTrigger>
                         <SelectContent>
@@ -185,6 +331,15 @@ export default function TradeHistory() {
                           ))}
                         </SelectContent>
                       </Select>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground max-w-[100px] truncate">
+                      {trade.pair_id ? (
+                        <Badge variant="secondary" className="font-mono">
+                          {trade.pair_id.substring(0, 8)}...
+                        </Badge>
+                      ) : (
+                        "N/A"
+                      )}
                     </TableCell>
                   </TableRow>
                 ))

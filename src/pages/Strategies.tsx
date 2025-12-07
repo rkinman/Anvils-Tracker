@@ -4,7 +4,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Plus, Trash2, TrendingUp, TrendingDown, Target, ArrowRight } from "lucide-react";
+import { Plus, Trash2, TrendingUp, TrendingDown, Target } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -32,7 +32,7 @@ export default function Strategies() {
       const { data, error } = await supabase
         .from('strategy_performance')
         .select('*')
-        .order('total_pnl', { ascending: false });
+        .order('realized_pnl', { ascending: false });
 
       if (error) throw error;
       return data;
@@ -145,55 +145,66 @@ export default function Strategies() {
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {strategies?.map((strategy) => (
-              <Card key={strategy.id} className="flex flex-col">
-                <CardHeader className="pb-2">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <CardTitle className="text-lg">{strategy.name}</CardTitle>
-                      <CardDescription className="line-clamp-1 mt-1">
-                        {strategy.description || "No description"}
-                      </CardDescription>
+            {strategies?.map((strategy) => {
+              const unrealizedPnL = Number(strategy.total_pnl) - Number(strategy.realized_pnl);
+              const isPositive = strategy.realized_pnl >= 0;
+
+              return (
+                <Card key={strategy.id} className="flex flex-col">
+                  <CardHeader className="pb-2">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <CardTitle className="text-lg">{strategy.name}</CardTitle>
+                        <CardDescription className="line-clamp-1 mt-1">
+                          {strategy.description || "No description"}
+                        </CardDescription>
+                      </div>
+                      {isPositive ? (
+                        <TrendingUp className="h-5 w-5 text-green-500" />
+                      ) : (
+                        <TrendingDown className="h-5 w-5 text-red-500" />
+                      )}
                     </div>
-                    {strategy.total_pnl >= 0 ? (
-                      <TrendingUp className="h-5 w-5 text-green-500" />
-                    ) : (
-                      <TrendingDown className="h-5 w-5 text-red-500" />
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="pb-2 flex-1">
-                  <div className="grid grid-cols-2 gap-4 mt-2">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Net P&L</p>
-                      <p className={`text-xl font-bold ${strategy.total_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(strategy.total_pnl)}
-                      </p>
+                  </CardHeader>
+                  <CardContent className="pb-2 flex-1">
+                    <div className="grid grid-cols-2 gap-4 mt-2">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Realized P&L</p>
+                        <p className={`text-xl font-bold ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
+                          {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(strategy.realized_pnl)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Unrealized P&L</p>
+                        <p className={`text-xl font-bold ${unrealizedPnL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(unrealizedPnL)}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Trades</p>
+                    <div className="mt-4">
+                      <p className="text-xs text-muted-foreground">Total Trades</p>
                       <p className="text-xl font-bold">{strategy.trade_count}</p>
                     </div>
-                  </div>
-                </CardContent>
-                <CardFooter className="pt-4 border-t flex justify-between">
-                   <div className="flex gap-2">
-                      <Badge variant="secondary">
-                        {strategy.win_count}W / {strategy.loss_count}L
-                      </Badge>
-                   </div>
-                   <div className="flex gap-2">
-                     <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => {
-                        if(confirm('Are you sure? This will unlink all trades from this strategy.')) {
-                          deleteMutation.mutate(strategy.id);
-                        }
-                     }}>
-                        <Trash2 className="h-4 w-4" />
-                     </Button>
-                   </div>
-                </CardFooter>
-              </Card>
-            ))}
+                  </CardContent>
+                  <CardFooter className="pt-4 border-t flex justify-between">
+                     <div className="flex gap-2">
+                        <Badge variant="secondary">
+                          {strategy.win_count}W / {strategy.loss_count}L (Realized)
+                        </Badge>
+                     </div>
+                     <div className="flex gap-2">
+                       <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => {
+                          if(confirm('Are you sure? This will unlink all trades from this strategy.')) {
+                            deleteMutation.mutate(strategy.id);
+                          }
+                       }}>
+                          <Trash2 className="h-4 w-4" />
+                       </Button>
+                     </div>
+                  </CardFooter>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>
