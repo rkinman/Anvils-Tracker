@@ -33,6 +33,23 @@ export interface ParsedTrade {
   multiplier: number;
 }
 
+// Helper to sanitize and parse currency strings like "$1.23" or "($45.67)"
+const sanitizeCurrency = (value: string | undefined): number => {
+  if (!value) return 0;
+  let sanitized = value.trim();
+  
+  const isNegative = sanitized.startsWith('(') && sanitized.endsWith(')');
+  
+  // Remove non-numeric characters except for the decimal point
+  sanitized = sanitized.replace(/[^0-9.-]+/g, "");
+  
+  let number = parseFloat(sanitized);
+  
+  if (isNaN(number)) return 0;
+  
+  return isNegative ? -Math.abs(number) : number;
+};
+
 export const parseTradeCSV = (file: File): Promise<ParsedTrade[]> => {
   return new Promise((resolve, reject) => {
     Papa.parse(file, {
@@ -41,32 +58,34 @@ export const parseTradeCSV = (file: File): Promise<ParsedTrade[]> => {
       complete: (results) => {
         try {
           const trades: ParsedTrade[] = results.data
-            .filter((row: any) => row.Symbol && (row.Date || row.Time)) // Basic validation, allowing Date or Time
+            .filter((row: any) => row.Symbol && (row.Date || row.Time))
             .map((row: any) => {
-              // Normalize data
+              // Sanitize and parse all relevant financial values
               const quantity = parseFloat(row.Quantity || '0');
+              const averagePricePerShare = sanitizeCurrency(row['Average Price'] || row.Price);
+              const amount = sanitizeCurrency(row.Value || row.Amount);
+              const fees = sanitizeCurrency(row.Fees || row.Commission);
               
-              // Use 'Average Price' or 'Price'
-              const rawPrice = row['Average Price'] || row.Price || '0';
-              const price = parseFloat(rawPrice);
-              
-              // Use 'Value' or 'Amount'
-              const rawAmount = row.Value || row.Amount || '0';
-              const amount = parseFloat(rawAmount);
-              
-              const fees = parseFloat(row.Fees || row.Commission || '0');
-              
-              // Determine Asset Type (Simple heuristic)
-              // Options usually have expiration dates or specific formats in symbols.
-              const asset_type = row.Symbol.length > 5 ? 'OPTION' : 'STOCK'; 
-              const multiplier = asset_type === 'OPTION' ? 100 : 1;
+              // Determine multiplier: prioritize CSV column, then use a heuristic
+              let multiplier = parseFloat(row.Multiplier || '0');
+              if (multiplier === 0) {
+                // Fallback heuristic if Multiplier column is not present or zero
+                const isOption = row.Symbol.length > 5; 
+                multiplier = isOption ? 100 : 1;
+              }
+
+              // The UI displays per-share price by calculating `database_price / multiplier`.
+              // Therefore, we must store the total price for the lot/contract.
+              const price = averagePricePerShare * multiplier;
+
+              const asset_type = multiplier === 100 ? 'OPTION' : 'STOCK';
 
               return {
                 symbol: row.Symbol,
                 date: new Date(row.Date || row.Time).toISOString(),
                 action: row.Action?.toUpperCase() || 'UNKNOWN',
                 quantity,
-                price,
+                price, // Storing total price (per-share * multiplier)
                 fees: Math.abs(fees),
                 amount,
                 asset_type,
