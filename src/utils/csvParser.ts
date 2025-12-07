@@ -7,8 +7,8 @@ export const generateImportHash = (row: any): string => {
     date: row.Date || row.Time,
     action: row.Action,
     qty: row.Quantity,
-    price: row.Price,
-    amount: row.Amount
+    price: row['Average Price'] || row.Price,
+    amount: row.Value || row.Amount
   });
   
   let hash = 0;
@@ -41,24 +41,29 @@ export const parseTradeCSV = (file: File): Promise<ParsedTrade[]> => {
       complete: (results) => {
         try {
           const trades: ParsedTrade[] = results.data
-            .filter((row: any) => row.Symbol && row.Date) // Basic validation
+            .filter((row: any) => row.Symbol && (row.Date || row.Time)) // Basic validation, allowing Date or Time
             .map((row: any) => {
               // Normalize data
               const quantity = parseFloat(row.Quantity || '0');
-              const price = parseFloat(row.Price || '0');
+              
+              // Use 'Average Price' or 'Price'
+              const rawPrice = row['Average Price'] || row.Price || '0';
+              const price = parseFloat(rawPrice);
+              
+              // Use 'Value' or 'Amount'
+              const rawAmount = row.Value || row.Amount || '0';
+              const amount = parseFloat(rawAmount);
+              
               const fees = parseFloat(row.Fees || row.Commission || '0');
-              const amount = parseFloat(row.Amount || '0');
               
               // Determine Asset Type (Simple heuristic)
-              // Options usually have expiration dates or specific formats in symbols, 
-              // but for now we default to OPTION as per user context, or STOCK if quantity is large/price is specific.
-              // We'll trust the user primarily trades options as requested.
+              // Options usually have expiration dates or specific formats in symbols.
               const asset_type = row.Symbol.length > 5 ? 'OPTION' : 'STOCK'; 
               const multiplier = asset_type === 'OPTION' ? 100 : 1;
 
               return {
                 symbol: row.Symbol,
-                date: new Date(row.Date).toISOString(),
+                date: new Date(row.Date || row.Time).toISOString(),
                 action: row.Action?.toUpperCase() || 'UNKNOWN',
                 quantity,
                 price,
