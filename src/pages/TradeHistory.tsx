@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,7 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, Loader2, Link as LinkIcon, Unlink, ArrowUp, ArrowDown, ArrowUpDown, Tag, EyeOff, Eye, Trash2, X } from "lucide-react";
+import { Search, Loader2, Link as LinkIcon, Unlink, ArrowUp, ArrowDown, ArrowUpDown, Tag, EyeOff, Eye, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { showSuccess, showError } from "@/utils/toast";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -128,6 +128,7 @@ export default function TradeHistory() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [showHidden, setShowHidden] = useState(false);
   const [tradesToDelete, setTradesToDelete] = useState<string[]>([]);
+  const [expandedPairs, setExpandedPairs] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
   // Fetch Trades
@@ -270,6 +271,29 @@ export default function TradeHistory() {
       } else {
         return prevSelected.filter(id => !groupIds.has(id));
       }
+    });
+  };
+
+  const handleSelectPair = (pairTradeIds: string[], checked: boolean) => {
+    setSelectedTrades(prev => {
+        const pairIdsSet = new Set(pairTradeIds);
+        if (checked) {
+            return Array.from(new Set([...prev, ...pairTradeIds]));
+        } else {
+            return prev.filter(id => !pairIdsSet.has(id));
+        }
+    });
+  };
+
+  const togglePair = (pairId: string) => {
+    setExpandedPairs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(pairId)) {
+        newSet.delete(pairId);
+      } else {
+        newSet.add(pairId);
+      }
+      return newSet;
     });
   };
 
@@ -416,6 +440,7 @@ export default function TradeHistory() {
             Object.entries(groupedTrades).map(([strategyId, group]) => {
               const allInGroupSelected = group.trades.every(t => selectedTrades.includes(t.id));
               const someInGroupSelected = group.trades.some(t => selectedTrades.includes(t.id));
+              const renderedPairIds = new Set<string>();
 
               return (
                 <div key={strategyId}>
@@ -443,35 +468,91 @@ export default function TradeHistory() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {group.trades.map((trade) => (
-                          <TableRow key={trade.id} data-state={selectedTrades.includes(trade.id) && "selected"} className={cn(trade.pair_id && "bg-primary/5", trade.hidden && "opacity-60 bg-muted/50")}>
-                            <TableCell><Checkbox checked={selectedTrades.includes(trade.id)} onCheckedChange={(checked) => handleSelectTrade(trade.id, !!checked)} /></TableCell>
-                            <TableCell className="font-medium min-w-[120px]">{format(new Date(trade.date), 'MMM d, yyyy')}</TableCell>
-                            <TableCell><Badge variant="outline" className="font-mono">{trade.symbol}</Badge></TableCell>
-                            <TableCell><span className={trade.action.includes('BUY') ? "text-red-400" : "text-green-400"}>{trade.action}</span></TableCell>
-                            <TableCell>{trade.hidden && <Badge variant="secondary">Hidden</Badge>}</TableCell>
-                            <TableCell className="text-right">{trade.quantity}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(trade.price / trade.multiplier, 2)}</TableCell>
-                            <TableCell className={`text-right font-bold ${Number(trade.amount) >= 0 ? "text-green-500" : "text-red-500"}`}>{formatCurrency(trade.amount, 2)}</TableCell>
-                            <TableCell className="min-w-[200px]">
-                              <Select defaultValue={trade.strategy_id || "none"} onValueChange={(val) => handleStrategyChange(trade.id, val)} disabled={updateStrategyMutation.isPending}>
-                                <SelectTrigger className="w-full h-8"><SelectValue placeholder="Assign" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none" className="text-muted-foreground">Unassigned</SelectItem>
-                                  {strategies?.map((s) => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground max-w-[100px] truncate">
-                              {trade.pair_id ? (<Badge variant="secondary" className="font-mono">{trade.pair_id.substring(0, 8)}...</Badge>) : "N/A"}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => setTradesToDelete([trade.id])}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {group.trades.map((trade) => {
+                          if (trade.pair_id) {
+                            if (renderedPairIds.has(trade.pair_id)) return null;
+                            renderedPairIds.add(trade.pair_id);
+
+                            const pairTrades = group.trades.filter(t => t.pair_id === trade.pair_id);
+                            const pairTradeIds = pairTrades.map(t => t.id);
+                            const netPnl = pairTrades.reduce((sum, t) => sum + t.amount, 0);
+                            const firstDate = pairTrades.reduce((earliest, t) => new Date(t.date) < new Date(earliest.date) ? t : earliest).date;
+                            const allInPairSelected = pairTrades.every(t => selectedTrades.includes(t.id));
+                            const someInPairSelected = pairTrades.some(t => selectedTrades.includes(t.id));
+                            const isExpanded = expandedPairs.has(trade.pair_id);
+
+                            return (
+                              <Fragment key={trade.pair_id}>
+                                <TableRow data-state={someInPairSelected && "selected"} className="bg-muted/30 font-medium">
+                                  <TableCell><Checkbox checked={allInPairSelected ? true : (someInPairSelected ? 'indeterminate' : false)} onCheckedChange={(checked) => handleSelectPair(pairTradeIds, !!checked)} /></TableCell>
+                                  <TableCell className="min-w-[120px]">{format(new Date(firstDate), 'MMM d, yyyy')}</TableCell>
+                                  <TableCell><Badge variant="secondary" className="font-mono">{trade.symbol}</Badge></TableCell>
+                                  <TableCell>Paired Trade</TableCell>
+                                  <TableCell>{trade.hidden && <Badge variant="secondary">Hidden</Badge>}</TableCell>
+                                  <TableCell className="text-right">-</TableCell>
+                                  <TableCell className="text-right">-</TableCell>
+                                  <TableCell className={`text-right font-bold ${netPnl >= 0 ? "text-green-500" : "text-red-500"}`}>{formatCurrency(netPnl, 2)}</TableCell>
+                                  <TableCell className="min-w-[200px]">
+                                    <Select defaultValue={trade.strategy_id || "none"} onValueChange={(val) => handleStrategyChange(trade.id, val)} disabled={updateStrategyMutation.isPending}>
+                                      <SelectTrigger className="w-full h-8"><SelectValue placeholder="Assign" /></SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="none" className="text-muted-foreground">Unassigned</SelectItem>
+                                        {strategies?.map((s) => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                  <TableCell className="text-xs text-muted-foreground max-w-[100px] truncate"><Badge variant="secondary" className="font-mono">{trade.pair_id.substring(0, 8)}...</Badge></TableCell>
+                                  <TableCell className="text-right">
+                                    <Button variant="ghost" size="sm" onClick={() => togglePair(trade.pair_id!)}>
+                                      {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                                {isExpanded && pairTrades.map(leg => (
+                                  <TableRow key={leg.id} className="bg-muted/10 text-muted-foreground">
+                                    <TableCell></TableCell>
+                                    <TableCell className="pl-8">{format(new Date(leg.date), 'MMM d, yyyy')}</TableCell>
+                                    <TableCell></TableCell>
+                                    <TableCell><span className={leg.action.includes('BUY') ? "text-red-400" : "text-green-400"}>{leg.action}</span></TableCell>
+                                    <TableCell></TableCell>
+                                    <TableCell className="text-right">{leg.quantity}</TableCell>
+                                    <TableCell className="text-right">{formatCurrency(leg.price / leg.multiplier, 2)}</TableCell>
+                                    <TableCell className={`text-right ${Number(leg.amount) >= 0 ? "text-green-500/80" : "text-red-500/80"}`}>{formatCurrency(leg.amount, 2)}</TableCell>
+                                    <TableCell colSpan={3}></TableCell>
+                                  </TableRow>
+                                ))}
+                              </Fragment>
+                            );
+                          } else {
+                            return (
+                              <TableRow key={trade.id} data-state={selectedTrades.includes(trade.id) && "selected"} className={cn(trade.hidden && "opacity-60 bg-muted/50")}>
+                                <TableCell><Checkbox checked={selectedTrades.includes(trade.id)} onCheckedChange={(checked) => handleSelectTrade(trade.id, !!checked)} /></TableCell>
+                                <TableCell className="font-medium min-w-[120px]">{format(new Date(trade.date), 'MMM d, yyyy')}</TableCell>
+                                <TableCell><Badge variant="outline" className="font-mono">{trade.symbol}</Badge></TableCell>
+                                <TableCell><span className={trade.action.includes('BUY') ? "text-red-400" : "text-green-400"}>{trade.action}</span></TableCell>
+                                <TableCell>{trade.hidden && <Badge variant="secondary">Hidden</Badge>}</TableCell>
+                                <TableCell className="text-right">{trade.quantity}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(trade.price / trade.multiplier, 2)}</TableCell>
+                                <TableCell className={`text-right font-bold ${Number(trade.amount) >= 0 ? "text-green-500" : "text-red-500"}`}>{formatCurrency(trade.amount, 2)}</TableCell>
+                                <TableCell className="min-w-[200px]">
+                                  <Select defaultValue={trade.strategy_id || "none"} onValueChange={(val) => handleStrategyChange(trade.id, val)} disabled={updateStrategyMutation.isPending}>
+                                    <SelectTrigger className="w-full h-8"><SelectValue placeholder="Assign" /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="none" className="text-muted-foreground">Unassigned</SelectItem>
+                                      {strategies?.map((s) => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
+                                <TableCell className="text-xs text-muted-foreground max-w-[100px] truncate">N/A</TableCell>
+                                <TableCell className="text-right">
+                                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => setTradesToDelete([trade.id])}>
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          }
+                        })}
                       </TableBody>
                     </Table>
                   </div>
