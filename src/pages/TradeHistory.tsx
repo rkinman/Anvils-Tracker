@@ -460,7 +460,7 @@ export default function TradeHistory() {
                       </span>
                     </TableCell>
                     <TableCell className="text-right">{trade.quantity}</TableCell>
-                    <TableCell className="text-right">${Number(trade.price).toFixed(2)}</TableCell>
+                    <TableCell className="text-right">${Number(trade.price / trade.multiplier).toFixed(4)}</TableCell>
                     <TableCell className={`text-right font-bold ${
                       Number(trade.amount) >= 0 ? "text-green-500" : "text-red-500"
                     }`}>
