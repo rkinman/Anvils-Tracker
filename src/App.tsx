@@ -9,6 +9,7 @@ import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import ImportTrades from "./pages/ImportTrades";
 import Strategies from "./pages/Strategies";
+import StrategyDetail from "./pages/StrategyDetail";
 import TradeHistory from "./pages/TradeHistory";
 import Settings from "./pages/Settings";
 import { useEffect, useState } from "react";
@@ -74,6 +75,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Strategies />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/strategies/:strategyId"
+              element={
+                <ProtectedRoute>
+                  <StrategyDetail />
                 </ProtectedRoute>
               }
             />

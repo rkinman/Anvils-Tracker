@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Plus, Trash2, TrendingUp, TrendingDown, Target } from "lucide-react";
+import { Plus, Trash2, TrendingUp, TrendingDown, Target, Eye } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -193,6 +194,11 @@ export default function Strategies() {
                         </Badge>
                      </div>
                      <div className="flex gap-2">
+                       <Button asChild variant="outline" size="sm">
+                         <Link to={`/strategies/${strategy.id}`}>
+                           <Eye className="mr-2 h-4 w-4" /> View
+                         </Link>
+                       </Button>
                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => {
                           if(confirm('Are you sure? This will unlink all trades from this strategy.')) {
                             deleteMutation.mutate(strategy.id);
