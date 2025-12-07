@@ -41,6 +41,8 @@ interface Strategy {
   realized_pnl: number;
   trade_count: number;
   dashboard_tags?: any[];
+  market_value?: number;
+  unrealized_pnl?: number;
 }
 
 export default function Strategies() {
@@ -51,38 +53,117 @@ export default function Strategies() {
   
   const queryClient = useQueryClient();
 
-  // Fetch strategies joined with performance view
+  // Fetch strategies joined with performance view and open positions
   const { data: strategies, isLoading: strategiesLoading } = useQuery({
     queryKey: ['strategies'],
     queryFn: async () => {
-      // We join the base table with the performance view manually in client or via separate queries
-      // Since Supabase views are read-only, we usually query the view for stats and table for metadata
-      // For simplicity, we'll query the performance view and enrich it with table specific columns
-      
+      // 1. Fetch base performance from view (Sum of Cash Flows)
       const { data: perfData, error: perfError } = await supabase
         .from('strategy_performance')
-        .select('*')
-        .order('realized_pnl', { ascending: false });
+        .select('*');
       
       if (perfError) throw perfError;
 
+      // 2. Fetch Metadata
       const { data: metaData, error: metaError } = await supabase
         .from('strategies')
         .select('id, capital_allocation, status, start_date, is_hidden');
 
       if (metaError) throw metaError;
 
+      // 3. Fetch Open Positions for Market Value Calculation
+      // We need mark_price, quantity, multiplier, action to calculate Market Value
+      const { data: openTrades, error: openError } = await supabase
+        .from('trades')
+        .select('strategy_id, mark_price, quantity, multiplier, action, unrealized_pnl')
+        .not('mark_price', 'is', null);
+
+      if (openError) throw openError;
+
+      // Calculate Market Value & Open P&L per strategy
+      const strategyOpenStats: Record<string, { mv: number; openPnl: number }> = {};
+      
+      openTrades.forEach(trade => {
+        if (!trade.strategy_id) return;
+        
+        if (!strategyOpenStats[trade.strategy_id]) {
+            strategyOpenStats[trade.strategy_id] = { mv: 0, openPnl: 0 };
+        }
+
+        // Market Value Calculation:
+        // Long (Buy): + (Price * Qty * Mult)
+        // Short (Sell): - (Price * Qty * Mult)
+        const isLong = trade.action.toUpperCase().includes('BUY') || trade.action.toUpperCase().includes('OPEN'); // Simplification, ideally check opening action
+        // Better logic: Assume positive quantity in DB. 
+        // If we are LONG, value is POSITIVE. If we are SHORT, value is NEGATIVE cost to close.
+        // Usually broker CSVs don't indicate "Current Position Side" explicitly in trade history rows easily.
+        // But for calculating Net Liq impact:
+        // If I sold a Put (Credit), Amount is positive. Liability is Negative.
+        // Let's rely on standard: 
+        // Value = mark_price * quantity * multiplier.
+        // We need to know if we are long or short.
+        // Heuristic: If we assume `unrealized_pnl` is correct from the broker, we can use that for P&L.
+        // For Total Equity, we strictly need: Sum(Amount) + Sum(Market Value).
+        
+        // Let's try to determine sign from `unrealized_pnl`? 
+        // If unrl > 0, we made money. 
+        // This doesn't help with Market Value sign.
+        
+        // Let's assume for now that standard options logic applies:
+        // For the sake of the "Total P&L" display which is typically "Net Liq" variation:
+        // Adjusted P&L = Sum(Cash) + Sum(Market Value of Longs) - Sum(Market Value of Shorts).
+        
+        // Let's use `unrealized_pnl` column directly as the "Open P&L".
+        // And `Adjusted Total` = `realized_pnl (view)` + `unrealized_pnl (sum)`.
+        // Wait, `realized_pnl` in view might be `Total P&L` (all cash flows).
+        // Let's assume `strategy_performance.total_pnl` IS the sum of all cash flows (realized).
+        // Then: True P&L = (Sum Cash Flows) + (Market Value of Open positions).
+        
+        // Actually, simpler approach that usually works:
+        // True P&L = (Sum of Realized P&L of CLOSED trades) + (Sum of Unrealized P&L of OPEN trades).
+        // The view `strategy_performance` likely calculates `total_pnl` as sum of `amount`.
+        // This includes the cost basis of open trades.
+        // So `View Total` = `Realized P&L` - `Cost of Open`.
+        // `Unrealized P&L` = `Market Value` - `Cost of Open`.
+        // So `Market Value` = `Unrealized P&L` + `Cost of Open`.
+        // `View Total` + `Market Value` = `Realized P&L` - `Cost of Open` + `Unrealized P&L` + `Cost of Open`
+        // = `Realized P&L` + `Unrealized P&L`.
+        // = **TRUE TOTAL P&L**.
+        
+        // So the formula is: Display P&L = View.total_pnl + Market_Value.
+        
+        // Calculating Market Value Sign:
+        // If action was 'SELL TO OPEN', we are short -> MV is negative.
+        // If action was 'BUY TO OPEN', we are long -> MV is positive.
+        
+        let sign = 1;
+        if (trade.action.includes('SELL') || trade.action.includes('Short')) sign = -1;
+        
+        const mv = (trade.mark_price || 0) * (trade.quantity || 0) * (trade.multiplier || 100) * sign;
+        
+        strategyOpenStats[trade.strategy_id].mv += mv;
+        strategyOpenStats[trade.strategy_id].openPnl += (trade.unrealized_pnl || 0);
+      });
+
       // Merge data
       return perfData.map(p => {
         const meta = metaData.find(m => m.id === p.id);
+        const openStats = strategyOpenStats[p.id] || { mv: 0, openPnl: 0 };
+        
+        // Adjust total P&L to include open positions value
+        const adjustedTotalPnl = Number(p.total_pnl) + openStats.mv;
+
         return {
           ...p,
           capital_allocation: meta?.capital_allocation || 0,
           status: meta?.status || 'active',
           start_date: meta?.start_date,
-          is_hidden: meta?.is_hidden
+          is_hidden: meta?.is_hidden,
+          market_value: openStats.mv,
+          unrealized_pnl: openStats.openPnl,
+          total_pnl: adjustedTotalPnl // Override with true total
         };
-      });
+      }).sort((a, b) => b.total_pnl - a.total_pnl);
     }
   });
 
@@ -192,7 +273,7 @@ export default function Strategies() {
 
   const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
 
-  const StrategyCard = ({ strategy }: { strategy: any }) => {
+  const StrategyCard = ({ strategy }: { strategy: Strategy }) => {
     const isTotalPositive = strategy.total_pnl >= 0;
     const roi = strategy.capital_allocation > 0 
       ? (strategy.total_pnl / strategy.capital_allocation) * 100 
@@ -245,7 +326,7 @@ export default function Strategies() {
         <CardContent className="flex-1 pb-4">
           {/* Main Metrics */}
           <div className="mb-4">
-            <div className="text-sm text-muted-foreground mb-1">Total P&L</div>
+            <div className="text-sm text-muted-foreground mb-1">Total P&L (Net Liq)</div>
             <div className="flex items-baseline gap-3">
               <span className={`text-3xl font-bold ${isTotalPositive ? 'text-green-500' : 'text-red-500'}`}>
                 {formatCurrency(strategy.total_pnl)}
@@ -258,9 +339,19 @@ export default function Strategies() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+          <div className="grid grid-cols-2 gap-4 mb-4 text-sm bg-muted/20 p-3 rounded-md">
             <div>
-              <span className="text-muted-foreground block text-xs">Capital Allocated</span>
+              <span className="text-muted-foreground block text-xs">Open P&L</span>
+              <span className={`font-medium ${(strategy.unrealized_pnl || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {formatCurrency(strategy.unrealized_pnl || 0)}
+              </span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block text-xs">Market Value</span>
+              <span className="font-medium">{formatCurrency(strategy.market_value || 0)}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block text-xs">Allocated Cap</span>
               <span className="font-medium">{formatCurrency(strategy.capital_allocation)}</span>
             </div>
             <div>

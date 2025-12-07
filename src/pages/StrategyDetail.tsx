@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { showSuccess, showError } from "@/utils/toast";
-import { Loader2, Save, Plus, ArrowLeft, Unlink, Search, Tag, Trash2, Settings, Eye, EyeOff, Calculator } from "lucide-react";
+import { Loader2, Save, Plus, ArrowLeft, Unlink, Search, Tag, Trash2, Settings, Eye, EyeOff, Calculator, Briefcase } from "lucide-react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -31,6 +31,10 @@ interface Trade {
   action: string;
   amount: number;
   tag_id: string | null;
+  mark_price: number | null;
+  quantity: number;
+  multiplier: number;
+  unrealized_pnl: number | null;
 }
 
 interface Tag {
@@ -83,9 +87,12 @@ export default function StrategyDetail() {
   const { data: assignedTrades, isLoading: assignedTradesLoading } = useQuery<Trade[]>({
     queryKey: ['assignedTrades', strategyId],
     queryFn: async () => {
-      const { data, error } = await supabase.from('trades').select('id, date, symbol, action, amount, tag_id').eq('strategy_id', strategyId!).order('date', { ascending: false });
+      const { data, error } = await supabase.from('trades')
+        .select('id, date, symbol, action, amount, tag_id, mark_price, quantity, multiplier, unrealized_pnl')
+        .eq('strategy_id', strategyId!)
+        .order('date', { ascending: false });
       if (error) throw error;
-      return data;
+      return data as Trade[];
     }
   });
 
@@ -175,6 +182,11 @@ export default function StrategyDetail() {
   };
 
   const filteredUnassignedTrades = useMemo(() => unassignedTrades?.filter(t => t.symbol.toLowerCase().includes(searchTerm.toLowerCase())), [unassignedTrades, searchTerm]);
+  
+  const openPositions = useMemo(() => {
+    return assignedTrades?.filter(t => t.mark_price !== null) || [];
+  }, [assignedTrades]);
+
   const groupedAssignedTrades = useMemo(() => {
     if (!assignedTrades) return {};
     const groups: Record<string, Trade[]> = { 'untagged': [] };
@@ -242,6 +254,52 @@ export default function StrategyDetail() {
                 </Button>
               </CardFooter>
             </Card>
+
+            {/* OPEN POSITIONS CARD */}
+            {openPositions.length > 0 && (
+              <Card className="border-l-4 border-l-blue-500">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Briefcase className="h-5 w-5 text-blue-500" /> 
+                    Open Positions
+                  </CardTitle>
+                  <CardDescription>Active trades currently held in this strategy.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="border rounded-md overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Symbol</TableHead>
+                          <TableHead className="text-right">Qty</TableHead>
+                          <TableHead className="text-right">Entry Price</TableHead>
+                          <TableHead className="text-right">Mark</TableHead>
+                          <TableHead className="text-right">Open P&L</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {openPositions.map(pos => {
+                          const entryPrice = Math.abs(pos.amount / (pos.quantity * pos.multiplier));
+                          // P&L color logic
+                          const pnl = pos.unrealized_pnl || 0;
+                          return (
+                            <TableRow key={pos.id}>
+                              <TableCell className="font-mono">{pos.symbol}</TableCell>
+                              <TableCell className="text-right">{pos.quantity}</TableCell>
+                              <TableCell className="text-right">${entryPrice.toFixed(2)}</TableCell>
+                              <TableCell className="text-right">${pos.mark_price?.toFixed(2)}</TableCell>
+                              <TableCell className={`text-right font-bold ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                {pnl > 0 ? '+' : ''}{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(pnl)}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
           
           <Card className="flex flex-col">
