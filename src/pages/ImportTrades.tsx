@@ -70,37 +70,114 @@ export default function ImportTrades() {
     setPositionStats(null);
 
     try {
-      console.log("📊 Starting position upload...");
+      console.log("🚀 Starting enhanced position upload...");
       
-      // 1. Parse the "Snapshot" CSV
+      // 1. Parse the positions CSV
       const parsedPositions = await parsePositionsCSV(file);
-      console.log(`✅ Parsed ${parsedPositions.length} positions from CSV`);
+      console.log(`📊 Parsed ${parsedPositions.length} positions from CSV`);
       
+      // Create maps for faster lookup
       const positionsMap = new Map(parsedPositions.map(p => [p.canonicalSymbol, p]));
+      const positionsByOriginalSymbol = new Map(parsedPositions.map(p => [p.symbol, p]));
+      
+      console.log("🗺️ Position maps created:");
+      console.log("Canonical symbols:", Array.from(positionsMap.keys()));
+      console.log("Original symbols:", Array.from(positionsByOriginalSymbol.keys()));
 
-      // 2. Fetch all currently "Open" trades from the database ledger
-      const { data: openTrades, error: fetchError } = await supabase
+      // 2. Fetch ALL trades that could potentially be open
+      // We'll look for trades with OPEN actions that don't have corresponding CLOSE actions
+      const { data: allTrades, error: fetchError } = await supabase
         .from('trades')
         .select('*')
-        .is('pair_id', null)
-        .like('action', '%OPEN%');
+        .order('date', { ascending: true });
       
       if (fetchError) throw fetchError;
-      console.log(`📋 Found ${openTrades?.length || 0} open trades in database`);
+      console.log(`📋 Found ${allTrades?.length || 0} total trades in database`);
+
+      // 3. Determine which trades are actually open
+      const openTrades = [];
+      const tradesBySymbol = new Map();
+      
+      // Group trades by symbol to track open/close pairs
+      for (const trade of allTrades || []) {
+        const symbol = trade.symbol;
+        if (!tradesBySymbol.has(symbol)) {
+          tradesBySymbol.set(symbol, []);
+        }
+        tradesBySymbol.get(symbol).push(trade);
+      }
+      
+      // For each symbol, determine net open position
+      for (const [symbol, trades] of tradesBySymbol.entries()) {
+        let netQuantity = 0;
+        let lastOpenTrade = null;
+        
+        for (const trade of trades) {
+          const action = trade.action.toUpperCase();
+          const qty = trade.quantity;
+          
+          if (action.includes('OPEN')) {
+            if (action.includes('BUY')) {
+              netQuantity += qty;
+            } else if (action.includes('SELL')) {
+              netQuantity -= qty;
+            }
+            lastOpenTrade = trade;
+          } else if (action.includes('CLOSE')) {
+            if (action.includes('BUY')) {
+              netQuantity -= qty;
+            } else if (action.includes('SELL')) {
+              netQuantity += qty;
+            }
+          }
+        }
+        
+        // If we have a net position and a last open trade, consider it open
+        if (Math.abs(netQuantity) > 0 && lastOpenTrade) {
+          openTrades.push(lastOpenTrade);
+          console.log(`📈 Open position detected: ${symbol} (net qty: ${netQuantity})`);
+        }
+      }
+      
+      console.log(`🔍 Identified ${openTrades.length} potentially open trades`);
 
       const updates: { id: string; mark_price: number | null }[] = [];
       const matchedTradeIds = new Set<string>();
       let matchCount = 0;
 
-      // 3. Match Logic - Match open trades with positions
-      for (const trade of openTrades || []) {
-        const tradeCanonical = parseTradeSymbol(trade.symbol, trade.asset_type);
-        const position = positionsMap.get(tradeCanonical);
+      // 4. Enhanced matching logic
+      for (const trade of openTrades) {
+        console.log(`\n🔍 Matching trade: ${trade.symbol} (${trade.asset_type})`);
         
-        console.log(`🔍 Checking trade: ${trade.symbol} (${tradeCanonical})`);
+        // Try multiple matching strategies
+        let position = null;
+        
+        // Strategy 1: Direct symbol match
+        position = positionsByOriginalSymbol.get(trade.symbol);
+        if (position) {
+          console.log(`✅ Direct symbol match found!`);
+        } else {
+          // Strategy 2: Canonical symbol match
+          const tradeCanonical = parseTradeSymbol(trade.symbol, trade.asset_type);
+          position = positionsMap.get(tradeCanonical);
+          if (position) {
+            console.log(`✅ Canonical symbol match found! (${tradeCanonical})`);
+          } else {
+            // Strategy 3: Fuzzy matching for options
+            if (trade.asset_type === 'OPTION') {
+              const underlying = trade.symbol.split(/\s+/)[0];
+              for (const [posSymbol, pos] of positionsByOriginalSymbol.entries()) {
+                if (posSymbol.startsWith(underlying)) {
+                  console.log(`🎯 Fuzzy match attempt: ${posSymbol}`);
+                  // You could add more sophisticated matching here
+                }
+              }
+            }
+          }
+        }
         
         if (position) {
-          console.log(`✅ MATCH FOUND! Mark: $${position.mark}`);
+          console.log(`✅ MATCH FOUND! Mark: $${position.mark}, Quantity: ${position.quantity}`);
           updates.push({ 
             id: trade.id, 
             mark_price: position.mark
@@ -108,12 +185,19 @@ export default function ImportTrades() {
           matchedTradeIds.add(trade.id);
           matchCount++;
         } else {
-          console.log(`❌ No position found for ${tradeCanonical}`);
+          console.log(`❌ No position found for ${trade.symbol}`);
         }
       }
       
-      // 4. Ghost Logic (Clear missing positions)
-      const tradesToClear = (openTrades || []).filter(t => !matchedTradeIds.has(t.id) && (t.mark_price !== null));
+      // 5. Clear mark prices for trades that are no longer in positions
+      const { data: tradesWithMarks, error: marksError } = await supabase
+        .from('trades')
+        .select('id, symbol')
+        .not('mark_price', 'is', null);
+        
+      if (marksError) throw marksError;
+      
+      const tradesToClear = (tradesWithMarks || []).filter(t => !matchedTradeIds.has(t.id));
       console.log(`🧹 Clearing ${tradesToClear.length} positions no longer in snapshot`);
       
       for (const trade of tradesToClear) {
@@ -123,45 +207,40 @@ export default function ImportTrades() {
         });
       }
 
-      // 5. Execute Updates
+      // 6. Execute all updates
       console.log(`💾 Executing ${updates.length} database updates...`);
       
       if (updates.length > 0) {
         let successCount = 0;
         let failCount = 0;
-        let firstError = null;
 
         for (const update of updates) {
-            const { error } = await supabase
-              .from('trades')
-              .update({ 
-                mark_price: update.mark_price
-              })
-              .eq('id', update.id);
-            
-            if (error) {
-                console.error("❌ Update failed for ID:", update.id, error);
-                failCount++;
-                if (!firstError) firstError = error;
-            } else {
-                successCount++;
-            }
+          const { error } = await supabase
+            .from('trades')
+            .update({ mark_price: update.mark_price })
+            .eq('id', update.id);
+          
+          if (error) {
+            console.error("❌ Update failed for ID:", update.id, error);
+            failCount++;
+          } else {
+            successCount++;
+          }
         }
 
         console.log(`✅ Successfully updated ${successCount} trades`);
         
         if (failCount > 0) {
-            console.error("⚠️ Failed updates:", failCount);
-            throw new Error(`Failed to update ${failCount} positions. First error: ${firstError?.message}`);
+          throw new Error(`Failed to update ${failCount} positions.`);
         }
       }
 
-      const unmatchedCount = (openTrades?.length || 0) - matchCount;
+      const unmatchedCount = openTrades.length - matchCount;
       setPositionStats({ matched: matchCount, unmatched: unmatchedCount, updated: updates.length });
       
-      showSuccess(`✅ Updated ${matchCount} positions. Cleared ${tradesToClear.length} closed positions.`);
+      showSuccess(`✅ Updated ${matchCount} open positions. Cleared ${tradesToClear.length} closed positions.`);
       
-      console.log("🎉 Position upload complete!");
+      console.log("🎉 Enhanced position upload complete!");
 
     } catch (error: any) {
       console.error("💥 Position upload error:", error);
@@ -220,13 +299,13 @@ export default function ImportTrades() {
         <Card>
           <CardHeader>
             <CardTitle>Update Open Positions</CardTitle>
-            <CardDescription>Upload your open positions CSV (Snapshot) to sync P&L.</CardDescription>
+            <CardDescription>Upload your open positions CSV to sync current market prices and P&L.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-col items-center justify-center p-10 border-2 border-dashed rounded-xl hover:bg-muted/50 transition-colors">
               <div className="mb-4 p-4 bg-primary/10 rounded-full"><TrendingUp className="h-8 w-8 text-primary" /></div>
               <h3 className="text-lg font-medium mb-2">Upload Positions</h3>
-              <p className="text-sm text-muted-foreground mb-6">Select your positions.csv file.</p>
+              <p className="text-sm text-muted-foreground mb-6">Select your positions.csv file to update open trade prices.</p>
               <Input ref={positionFileInputRef} id="positions-upload" type="file" accept=".csv" className="hidden" onChange={handlePositionUpload} disabled={positionLoading} />
               <Button asChild disabled={positionLoading} size="lg">
                 <label htmlFor="positions-upload" className="cursor-pointer">
@@ -239,8 +318,8 @@ export default function ImportTrades() {
                 <Alert><CheckCircle className="h-4 w-4" /><AlertTitle>Processing Complete</AlertTitle>
                   <AlertDescription>
                     <ul className="list-disc list-inside space-y-1 mt-2">
-                      <li><strong>{positionStats.matched}</strong> positions matched and updated with current prices.</li>
-                      <li><strong>{positionStats.unmatched}</strong> open trades not found in snapshot (may be closed).</li>
+                      <li><strong>{positionStats.matched}</strong> open positions matched and updated with current prices.</li>
+                      <li><strong>{positionStats.unmatched}</strong> open trades not found in positions snapshot.</li>
                       <li><strong>{positionStats.updated}</strong> total database updates performed.</li>
                     </ul>
                   </AlertDescription>
@@ -250,12 +329,14 @@ export default function ImportTrades() {
             <Alert className="mt-6" variant="default">
               <Info className="h-4 w-4" /><AlertTitle>How It Works</AlertTitle>
               <AlertDescription>
-                This upload acts as a <strong>snapshot</strong> of your current positions. The system will:
+                The system analyzes your trade history to identify open positions, then matches them with your positions CSV:
                 <ul className="list-disc list-inside mt-2 space-y-1">
-                  <li>Match positions by symbol and update their current market prices</li>
-                  <li>Calculate unrealized P&L automatically</li>
-                  <li>Clear mark prices for positions no longer in the snapshot</li>
+                  <li>Identifies trades with net open quantities</li>
+                  <li>Matches by symbol using multiple strategies</li>
+                  <li>Updates current market prices for accurate P&L</li>
+                  <li>Clears prices for positions no longer held</li>
                 </ul>
+                <strong>Check browser console for detailed matching logs.</strong>
               </AlertDescription>
             </Alert>
           </CardContent>

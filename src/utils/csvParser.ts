@@ -23,32 +23,65 @@ export const generateImportHash = (row: any): string => {
 
 // Parses tastytrade trade history symbols into a standardized format.
 // Example Input: 'SPY 12/18/26 C670' -> Output: 'SPY:2026-12-18:670.00:C'
+// Example Input: 'NVDA   241220C00140000' -> Output: 'NVDA:2024-12-20:140.00:C'
 export const parseSymbolToCanonical = (symbol: string, type: string): string => {
+  console.log(`🔍 Trade CSV - Parsing symbol: "${symbol}" of type: "${type}"`);
+  
   if (type !== 'OPTION' && type !== 'FUTURES_OPTION') {
-    return symbol.trim();
+    const result = symbol.trim();
+    console.log(`✅ Stock symbol: ${result}`);
+    return result;
   }
   
-  const parts = symbol.trim().split(/\s+/);
-  if (parts.length < 3) return symbol.trim();
+  const trimmed = symbol.trim();
+  
+  // Try to match the OCC format first (from positions CSV): UNDERLYING + SPACES + YYMMDDCPXXXXXXXX
+  const occMatch = trimmed.match(/^([A-Z]+)\s+(\d{6})([CP])(\d{8})$/);
+  if (occMatch) {
+    try {
+      const [, underlying, dateStr, callPut, strikeStr] = occMatch;
+      
+      console.log(`📊 OCC format - underlying=${underlying}, date=${dateStr}, type=${callPut}, strike=${strikeStr}`);
+      
+      const expDate = parse(dateStr, 'yyMMdd', new Date());
+      const formattedDate = format(expDate, 'yyyy-MM-dd');
+      const strike = parseFloat(strikeStr) / 1000;
 
-  try {
-    const underlying = parts[0];
-    const dateStr = parts[1];
-    const optionPart = parts[2];
-
-    const expDate = parse(dateStr, 'MM/dd/yy', new Date());
-    const formattedDate = format(expDate, 'yyyy-MM-dd');
-    
-    const callPut = optionPart.charAt(0).toUpperCase();
-    const strike = parseFloat(optionPart.substring(1));
-
-    return `${underlying}:${formattedDate}:${strike.toFixed(2)}:${callPut}`;
-  } catch (e) {
-    console.warn(`Could not parse trade symbol: ${symbol}`);
-    return symbol.trim();
+      const canonical = `${underlying}:${formattedDate}:${strike.toFixed(2)}:${callPut}`;
+      console.log(`✅ OCC canonical: ${canonical}`);
+      return canonical;
+    } catch (e) {
+      console.warn(`⚠️ Could not parse OCC format: ${symbol}`);
+    }
   }
-};
+  
+  // Try the human-readable format: 'SPY 12/18/26 C670'
+  const parts = trimmed.split(/\s+/);
+  if (parts.length >= 3) {
+    try {
+      const underlying = parts[0];
+      const dateStr = parts[1];
+      const optionPart = parts[2];
 
+      console.log(`📊 Human format - underlying=${underlying}, date=${dateStr}, option=${optionPart}`);
+
+      const expDate = parse(dateStr, 'MM/dd/yy', new Date());
+      const formattedDate = format(expDate, 'yyyy-MM-dd');
+      
+      const callPut = optionPart.charAt(0).toUpperCase();
+      const strike = parseFloat(optionPart.substring(1));
+
+      const canonical = `${underlying}:${formattedDate}:${strike.toFixed(2)}:${callPut}`;
+      console.log(`✅ Human canonical: ${canonical}`);
+      return canonical;
+    } catch (e) {
+      console.warn(`⚠️ Could not parse human format: ${symbol}`);
+    }
+  }
+
+  console.warn(`❌ Could not parse trade symbol: ${symbol}`);
+  return trimmed;
+};
 
 export interface ParsedTrade {
   symbol: string;
@@ -88,11 +121,18 @@ export const parseTradeCSV = (file: File): Promise<ParsedTrade[]> => {
       skipEmptyLines: true,
       complete: (results) => {
         try {
+          console.log(`📋 Trade CSV raw data:`, results.data);
+          
           const trades: ParsedTrade[] = (results.data as any[])
-            .filter((row: any) => row.Type === 'Trade' && row.Symbol) // Explicitly filter for trades
+            .filter((row: any) => {
+              const isValidTrade = row.Type === 'Trade' && row.Symbol;
+              console.log(`🔍 Trade filter - Type: "${row.Type}", Symbol: "${row.Symbol}", valid: ${isValidTrade}`);
+              return isValidTrade;
+            })
             .map((row: any) => {
+              console.log(`🔄 Processing trade row:`, row);
+              
               const quantity = parseFloat(row.Quantity || '0');
-              // 'Average Price' in tastytrade CSV is price per contract/lot, not per share for options.
               const pricePerContract = sanitizeCurrency(row['Average Price']);
               const amount = sanitizeCurrency(row.Value);
               const commissions = sanitizeCurrency(row.Commissions);
@@ -108,13 +148,10 @@ export const parseTradeCSV = (file: File): Promise<ParsedTrade[]> => {
                 }
               }
 
-              // The UI displays per-share price by calculating `database_price / multiplier`.
-              // 'Average Price' from the CSV is already the value we want to store as `price`.
               const price = pricePerContract;
-
               const asset_type = multiplier === 100 ? 'OPTION' : 'STOCK';
 
-              return {
+              const trade = {
                 symbol: row.Symbol,
                 date: new Date(row.Date || row.Time).toISOString(),
                 action: row.Action?.toUpperCase() || 'UNKNOWN',
@@ -126,14 +163,20 @@ export const parseTradeCSV = (file: File): Promise<ParsedTrade[]> => {
                 multiplier,
                 import_hash: generateImportHash(row)
               };
+              
+              console.log(`✅ Parsed trade:`, trade);
+              return trade;
             });
           
+          console.log(`🎉 Final trades array:`, trades);
           resolve(trades);
         } catch (err) {
+          console.error(`💥 Error parsing trade CSV:`, err);
           reject(err);
         }
       },
       error: (error) => {
+        console.error(`💥 Papa Parse error:`, error);
         reject(error);
       }
     });
