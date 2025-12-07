@@ -290,26 +290,44 @@ export default function TradeHistory() {
 
   const groupedTrades = useMemo(() => {
     if (!sortedTrades) return {};
-    const groups = sortedTrades.reduce((acc, trade) => {
-      const strategyId = trade.strategy_id || 'unassigned';
-      const strategyName = trade.strategies?.name || 'Unassigned Trades';
-      if (!acc[strategyId]) {
-        acc[strategyId] = { name: strategyName, trades: [] };
-      }
-      acc[strategyId].trades.push(trade);
-      return acc;
-    }, {} as Record<string, { name: string; trades: Trade[] }>);
 
+    const groups: Record<string, { name: string; trades: Trade[] }> = {};
+    const hiddenGroup: { name: string; trades: Trade[] } = { name: 'Hidden Trades', trades: [] };
+
+    // Partition trades into strategy groups and a single hidden group
+    for (const trade of sortedTrades) {
+      if (trade.hidden) {
+        hiddenGroup.trades.push(trade);
+      } else {
+        const strategyId = trade.strategy_id || 'unassigned';
+        const strategyName = trade.strategies?.name || 'Unassigned Trades';
+        if (!groups[strategyId]) {
+          groups[strategyId] = { name: strategyName, trades: [] };
+        }
+        groups[strategyId].trades.push(trade);
+      }
+    }
+
+    // Sort the strategy groups
     const orderedKeys = Object.keys(groups).sort((a, b) => {
       if (a === 'unassigned') return -1;
       if (b === 'unassigned') return 1;
       return groups[a].name.localeCompare(groups[b].name);
     });
 
-    return orderedKeys.reduce((acc, key) => {
-      acc[key] = groups[key];
+    const finalGroups = orderedKeys.reduce((acc, key) => {
+      if (groups[key].trades.length > 0) { // Only add groups that have trades
+        acc[key] = groups[key];
+      }
       return acc;
     }, {} as Record<string, { name: string; trades: Trade[] }>);
+
+    // Add the hidden group at the end if it has trades
+    if (hiddenGroup.trades.length > 0) {
+      finalGroups['hidden'] = hiddenGroup;
+    }
+
+    return finalGroups;
   }, [sortedTrades]);
 
   return (
