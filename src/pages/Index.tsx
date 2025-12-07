@@ -10,35 +10,70 @@ import { DashboardChart } from "@/components/DashboardChart";
 
 const Index = () => {
   const { data: stats, isLoading } = useQuery({
-    queryKey: ['dashboard-stats'],
+    queryKey: ['dashboard-stats-v2'],
     queryFn: async () => {
-      // 1. Fetch all non-hidden trades to calculate metrics
+      // 1. Fetch all non-hidden trades with necessary columns for valuation
       const { data: trades, error } = await supabase
         .from('trades')
-        .select('amount, action, quantity, date')
+        .select('*')
         .eq('hidden', false) // Exclude hidden trades
         .order('date', { ascending: true });
       
       if (error) throw error;
 
-      // Calculate Total P&L
-      const totalPnL = trades.reduce((acc, t) => acc + Number(t.amount), 0);
+      let totalPnL = 0;
+      let realizedPnL = 0;
+      let unrealizedPnL = 0;
+      let winCount = 0;
+      let lossCount = 0;
+      let closeCount = 0;
+
+      // Calculate Metrics
+      trades.forEach(trade => {
+        const amount = Number(trade.amount);
+        
+        // Handle Open Positions (Unrealized P&L)
+        if (trade.mark_price !== null) {
+          const mark = Math.abs(Number(trade.mark_price));
+          const qty = Number(trade.quantity);
+          const mult = Number(trade.multiplier);
+          
+          // Sign Logic: Short (Sell) = -1, Long (Buy) = +1
+          const isShort = trade.action.toUpperCase().includes('SELL') || trade.action.toUpperCase().includes('SHORT');
+          const sign = isShort ? -1 : 1;
+          
+          const marketValue = mark * qty * mult * sign;
+          
+          // For open trades, P&L = Current Value + Cost Basis (Amount)
+          totalPnL += (marketValue + amount);
+          unrealizedPnL += (marketValue + amount);
+        } else {
+          // Closed/Realized Trades
+          totalPnL += amount;
+          realizedPnL += amount;
+
+          // Win Rate Logic (Approximate based on realized transaction P&L)
+          if (trade.action.toUpperCase().includes('CLOSE') || trade.action.toUpperCase().includes('EXP')) {
+             closeCount++;
+             if (amount > 0) winCount++;
+             else if (amount < 0) lossCount++;
+          }
+        }
+      });
+
+      // Basic heuristic for open positions count
+      const openCount = trades.filter(t => t.mark_price !== null).length;
       
-      // Basic heuristic for open positions
-      const openCount = trades.filter(t => t.action.includes('OPEN')).length;
-      const closeCount = trades.filter(t => t.action.includes('CLOSE')).length;
-      const activePositionsEstimate = Math.max(0, openCount - closeCount);
-      
-      // Calculate Win Rate
-      const closedTrades = trades.filter(t => t.action.includes('CLOSE'));
-      const winningTrades = closedTrades.filter(t => Number(t.amount) > 0);
-      const winRate = closedTrades.length > 0 
-        ? Math.round((winningTrades.length / closedTrades.length) * 100) 
+      // Calculate Win Rate based on closed transactions
+      const winRate = closeCount > 0 
+        ? Math.round((winCount / closeCount) * 100) 
         : 0;
 
       return {
         totalPnL,
-        activePositions: activePositionsEstimate,
+        realizedPnL,
+        unrealizedPnL,
+        activePositions: openCount,
         winRate,
         tradeCount: trades.length,
         trades: trades // Pass trades to chart
@@ -78,7 +113,7 @@ const Index = () => {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total P&L</CardTitle>
+              <CardTitle className="text-sm font-medium">Total Net Liquidity</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -87,7 +122,7 @@ const Index = () => {
               }`}>
                 {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(stats?.totalPnL || 0)}
               </div>
-              <p className="text-xs text-muted-foreground">All time realized</p>
+              <p className="text-xs text-muted-foreground">Realized + Unrealized P&L</p>
             </CardContent>
           </Card>
           
@@ -98,7 +133,7 @@ const Index = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats?.activePositions}</div>
-              <p className="text-xs text-muted-foreground">Est. Open Trades</p>
+              <p className="text-xs text-muted-foreground">Open Trades / Legs</p>
             </CardContent>
           </Card>
           
@@ -109,7 +144,7 @@ const Index = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats?.winRate}%</div>
-              <p className="text-xs text-muted-foreground">Based on closed legs</p>
+              <p className="text-xs text-muted-foreground">Based on closed transactions</p>
             </CardContent>
           </Card>
           
@@ -129,7 +164,7 @@ const Index = () => {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
           <Card className="col-span-4 lg:col-span-7">
             <CardHeader>
-              <CardTitle>P&L Performance</CardTitle>
+              <CardTitle>Cash P&L Performance</CardTitle>
             </CardHeader>
             <CardContent className="pl-0">
                <DashboardChart trades={stats?.trades || []} />

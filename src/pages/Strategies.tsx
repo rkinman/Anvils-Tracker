@@ -27,7 +27,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { showSuccess, showError } from "@/utils/toast";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
 
 interface Strategy {
   id: string;
@@ -54,46 +53,93 @@ export default function Strategies() {
   
   const queryClient = useQueryClient();
 
-  // Fetch strategies with performance data
+  // Fetch strategies and perform calculations client-side for accuracy
   const { data: strategies, isLoading: strategiesLoading } = useQuery({
-    queryKey: ['strategies'],
+    queryKey: ['strategies-calculated'],
     queryFn: async () => {
-      // Fetch performance data from view
-      const { data: perfData, error: perfError } = await supabase
-        .from('strategy_performance')
-        .select('*');
-      
-      if (perfError) throw perfError;
-
-      // Fetch metadata
-      const { data: metaData, error: metaError } = await supabase
+      // 1. Fetch Strategies
+      const { data: strategiesData, error: stratError } = await supabase
         .from('strategies')
-        .select('id, capital_allocation, status, start_date, is_hidden');
+        .select('*');
+      if (stratError) throw stratError;
 
-      if (metaError) throw metaError;
+      // 2. Fetch All Trades (needed for accurate aggregation)
+      const { data: tradesData, error: tradesError } = await supabase
+        .from('trades')
+        .select('*');
+      if (tradesError) throw tradesError;
 
-      // Fetch dashboard tags
+      // 3. Fetch Dashboard Tags
       const { data: dashboardTagsData } = await supabase
         .from('tag_performance')
         .select('*')
         .eq('show_on_dashboard', true);
 
-      // Merge data
-      const merged = perfData.map(p => {
-        const meta = metaData.find(m => m.id === p.id);
-        const strategyTags = dashboardTagsData?.filter(t => t.strategy_id === p.id) || [];
+      // 4. Calculate Metrics per Strategy
+      const calculatedStrategies = strategiesData.map(strategy => {
+        const stratTrades = tradesData.filter(t => t.strategy_id === strategy.id && !t.hidden);
+        
+        let total_pnl = 0;
+        let realized_pnl = 0;
+        let unrealized_pnl = 0;
+        let win_count = 0;
+        let loss_count = 0;
+
+        // Group trades to estimate wins/losses (simplified by trade grouping if possible, otherwise by line item P&L for realized)
+        // For P&L, we iterate:
+        stratTrades.forEach(trade => {
+            // Cash Flow
+            const amount = Number(trade.amount);
+            
+            // Market Value Calculation
+            let marketValue = 0;
+            if (trade.mark_price !== null) {
+                const mark = Math.abs(Number(trade.mark_price));
+                const qty = Number(trade.quantity);
+                const mult = Number(trade.multiplier);
+                
+                // Determine sign: Long = +1, Short = -1
+                // Standard logic: Buy adds positive asset value, Sell adds negative liability value
+                const isShort = trade.action.toUpperCase().includes('SELL') || trade.action.toUpperCase().includes('SHORT');
+                const sign = isShort ? -1 : 1;
+                
+                marketValue = mark * qty * mult * sign;
+                
+                // Unrealized P&L for this specific trade = Current Value + Cost (Amount is usually negative for buys)
+                const tradeUnrealized = marketValue + amount;
+                unrealized_pnl += tradeUnrealized;
+            } else {
+                // If no mark price, it's considered closed/realized
+                realized_pnl += amount;
+                
+                // Estimate Win/Loss on realized trades
+                if (amount > 0) win_count++;
+                if (amount < 0) loss_count++;
+            }
+        });
+
+        // Total P&L = Realized + Unrealized
+        total_pnl = realized_pnl + unrealized_pnl;
+
+        const strategyTags = dashboardTagsData?.filter(t => t.strategy_id === strategy.id) || [];
 
         return {
-          ...p,
-          capital_allocation: meta?.capital_allocation || 0,
-          status: meta?.status || 'active',
-          start_date: meta?.start_date,
-          is_hidden: meta?.is_hidden || false,
+          ...strategy,
+          capital_allocation: strategy.capital_allocation || 0,
+          status: strategy.status || 'active',
+          start_date: strategy.start_date,
+          is_hidden: strategy.is_hidden || false,
+          total_pnl,
+          realized_pnl,
+          unrealized_pnl,
+          trade_count: stratTrades.length,
+          win_count,
+          loss_count,
           dashboard_tags: strategyTags
         };
-      }).sort((a, b) => b.total_pnl - a.total_pnl);
+      });
 
-      return merged as Strategy[];
+      return calculatedStrategies.sort((a, b) => b.total_pnl - a.total_pnl) as Strategy[];
     }
   });
 
@@ -116,7 +162,7 @@ export default function Strategies() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['strategies'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
       setIsCreateOpen(false);
       setFormData({ name: "", description: "", capital_allocation: "0" });
       showSuccess("Strategy created successfully!");
@@ -130,7 +176,7 @@ export default function Strategies() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['strategies'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
       showSuccess("Strategy status updated");
     }
   });
@@ -145,7 +191,7 @@ export default function Strategies() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['strategies'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
       setIsEditOpen(false);
       showSuccess("Strategy updated successfully!");
     },
@@ -155,7 +201,7 @@ export default function Strategies() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => supabase.from('strategies').delete().eq('id', id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['strategies'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
       showSuccess("Strategy deleted");
     }
   });
@@ -197,8 +243,10 @@ export default function Strategies() {
       ? (strategy.total_pnl / strategy.capital_allocation) * 100 
       : 0;
     
-    const winRate = (strategy.win_count + strategy.loss_count) > 0
-      ? (strategy.win_count / (strategy.win_count + strategy.loss_count)) * 100
+    // Win rate approximation
+    const totalClosed = strategy.win_count + strategy.loss_count;
+    const winRate = totalClosed > 0
+      ? (strategy.win_count / totalClosed) * 100
       : 0;
 
     return (
@@ -292,9 +340,9 @@ export default function Strategies() {
             <div className="bg-muted/30 p-3 rounded-md">
               <span className="text-muted-foreground block text-xs mb-1 flex items-center gap-1">
                 <Activity className="h-3 w-3" />
-                Win Rate
+                Trades / Win Rate
               </span>
-              <span className="font-medium">{winRate.toFixed(0)}%</span>
+              <span className="font-medium">{strategy.trade_count} / {winRate.toFixed(0)}%</span>
             </div>
           </div>
 
