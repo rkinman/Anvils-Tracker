@@ -28,7 +28,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { showSuccess, showError } from "@/utils/toast";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
 
 interface Strategy {
   id: string;
@@ -72,86 +71,82 @@ export default function Strategies() {
       if (metaError) throw metaError;
 
       // 3. Fetch Open Positions for Market Value Calculation
-      // We need mark_price, quantity, multiplier, action to calculate Market Value
+      // We need mark_price, quantity, multiplier, action, amount (cost basis), and tag_id
       const { data: openTrades, error: openError } = await supabase
         .from('trades')
-        .select('strategy_id, mark_price, quantity, multiplier, action, unrealized_pnl')
+        .select('strategy_id, tag_id, mark_price, quantity, multiplier, action, amount')
         .not('mark_price', 'is', null);
 
       if (openError) throw openError;
 
-      // Calculate Market Value & Open P&L per strategy
+      // Calculate Market Value & Open P&L per strategy and per tag
       const strategyOpenStats: Record<string, { mv: number; openPnl: number }> = {};
+      const tagOpenStats: Record<string, { mv: number; openPnl: number }> = {};
       
       openTrades.forEach(trade => {
-        if (!trade.strategy_id) return;
-        
-        if (!strategyOpenStats[trade.strategy_id]) {
-            strategyOpenStats[trade.strategy_id] = { mv: 0, openPnl: 0 };
-        }
+        const stratId = trade.strategy_id;
+        const tagId = trade.tag_id;
 
-        // Market Value Calculation:
-        // Long (Buy): + (Price * Qty * Mult)
-        // Short (Sell): - (Price * Qty * Mult)
-        const isLong = trade.action.toUpperCase().includes('BUY') || trade.action.toUpperCase().includes('OPEN'); // Simplification, ideally check opening action
-        // Better logic: Assume positive quantity in DB. 
-        // If we are LONG, value is POSITIVE. If we are SHORT, value is NEGATIVE cost to close.
-        // Usually broker CSVs don't indicate "Current Position Side" explicitly in trade history rows easily.
-        // But for calculating Net Liq impact:
-        // If I sold a Put (Credit), Amount is positive. Liability is Negative.
-        // Let's rely on standard: 
-        // Value = mark_price * quantity * multiplier.
-        // We need to know if we are long or short.
-        // Heuristic: If we assume `unrealized_pnl` is correct from the broker, we can use that for P&L.
-        // For Total Equity, we strictly need: Sum(Amount) + Sum(Market Value).
-        
-        // Let's try to determine sign from `unrealized_pnl`? 
-        // If unrl > 0, we made money. 
-        // This doesn't help with Market Value sign.
-        
-        // Let's assume for now that standard options logic applies:
-        // For the sake of the "Total P&L" display which is typically "Net Liq" variation:
-        // Adjusted P&L = Sum(Cash) + Sum(Market Value of Longs) - Sum(Market Value of Shorts).
-        
-        // Let's use `unrealized_pnl` column directly as the "Open P&L".
-        // And `Adjusted Total` = `realized_pnl (view)` + `unrealized_pnl (sum)`.
-        // Wait, `realized_pnl` in view might be `Total P&L` (all cash flows).
-        // Let's assume `strategy_performance.total_pnl` IS the sum of all cash flows (realized).
-        // Then: True P&L = (Sum Cash Flows) + (Market Value of Open positions).
-        
-        // Actually, simpler approach that usually works:
-        // True P&L = (Sum of Realized P&L of CLOSED trades) + (Sum of Unrealized P&L of OPEN trades).
-        // The view `strategy_performance` likely calculates `total_pnl` as sum of `amount`.
-        // This includes the cost basis of open trades.
-        // So `View Total` = `Realized P&L` - `Cost of Open`.
-        // `Unrealized P&L` = `Market Value` - `Cost of Open`.
-        // So `Market Value` = `Unrealized P&L` + `Cost of Open`.
-        // `View Total` + `Market Value` = `Realized P&L` - `Cost of Open` + `Unrealized P&L` + `Cost of Open`
-        // = `Realized P&L` + `Unrealized P&L`.
-        // = **TRUE TOTAL P&L**.
-        
-        // So the formula is: Display P&L = View.total_pnl + Market_Value.
-        
-        // Calculating Market Value Sign:
-        // If action was 'SELL TO OPEN', we are short -> MV is negative.
-        // If action was 'BUY TO OPEN', we are long -> MV is positive.
-        
+        // Determine direction: Short (Sell) or Long (Buy)
         let sign = 1;
-        if (trade.action.includes('SELL') || trade.action.includes('Short')) sign = -1;
+        const actionUpper = trade.action.toUpperCase();
+        if (actionUpper.includes('SELL') || actionUpper.includes('SHORT')) {
+            sign = -1;
+        }
         
+        // Market Value = Price * Qty * Multiplier * Sign
         const mv = (trade.mark_price || 0) * (trade.quantity || 0) * (trade.multiplier || 100) * sign;
         
-        strategyOpenStats[trade.strategy_id].mv += mv;
-        strategyOpenStats[trade.strategy_id].openPnl += (trade.unrealized_pnl || 0);
+        // Open P&L = Market Value + Cost Basis (Amount)
+        // Note: Amount is negative for Buys, Positive for Sells.
+        const openPnl = mv + (trade.amount || 0);
+
+        // Aggregate Strategy Stats
+        if (stratId) {
+            if (!strategyOpenStats[stratId]) {
+                strategyOpenStats[stratId] = { mv: 0, openPnl: 0 };
+            }
+            strategyOpenStats[stratId].mv += mv;
+            strategyOpenStats[stratId].openPnl += openPnl;
+        }
+
+        // Aggregate Tag Stats
+        if (tagId) {
+            if (!tagOpenStats[tagId]) {
+                tagOpenStats[tagId] = { mv: 0, openPnl: 0 };
+            }
+            tagOpenStats[tagId].mv += mv;
+            tagOpenStats[tagId].openPnl += openPnl;
+        }
       });
+
+      // Fetch dashboard tags to merge later
+      const { data: dashboardTagsData } = await supabase
+        .from('tag_performance')
+        .select('*')
+        .eq('show_on_dashboard', true);
 
       // Merge data
       return perfData.map(p => {
         const meta = metaData.find(m => m.id === p.id);
         const openStats = strategyOpenStats[p.id] || { mv: 0, openPnl: 0 };
         
-        // Adjust total P&L to include open positions value
+        // Adjusted Total P&L = Realized Cash Flows (from view) + Open Position Value (MV)
+        // Note: 'total_pnl' in view is Sum(Amount). 
+        // True P&L = Sum(Amount) + Sum(MV).
         const adjustedTotalPnl = Number(p.total_pnl) + openStats.mv;
+
+        // Process Tags for this strategy
+        const strategyTags = dashboardTagsData?.filter(t => t.strategy_id === p.id).map(t => {
+            const tStats = tagOpenStats[t.tag_id] || { mv: 0, openPnl: 0 };
+            return {
+                ...t,
+                // Adjust tag total P&L similarly
+                total_pnl: Number(t.total_pnl) + tStats.mv,
+                market_value: tStats.mv,
+                open_pnl: tStats.openPnl
+            };
+        }) || [];
 
         return {
           ...p,
@@ -160,32 +155,16 @@ export default function Strategies() {
           start_date: meta?.start_date,
           is_hidden: meta?.is_hidden,
           market_value: openStats.mv,
-          unrealized_pnl: openStats.openPnl,
-          total_pnl: adjustedTotalPnl // Override with true total
+          unrealized_pnl: openStats.openPnl, // Calculated manually
+          total_pnl: adjustedTotalPnl,
+          dashboard_tags: strategyTags
         };
       }).sort((a, b) => b.total_pnl - a.total_pnl);
     }
   });
 
-  const { data: dashboardTags, isLoading: tagsLoading } = useQuery({
-    queryKey: ['dashboardTags'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('tag_performance').select('*').eq('show_on_dashboard', true);
-      if (error) throw error;
-      return data;
-    }
-  });
-
-  const strategiesWithTags = useMemo(() => {
-    if (!strategies || !dashboardTags) return strategies;
-    return strategies.map(strategy => ({
-      ...strategy,
-      dashboard_tags: dashboardTags.filter(tag => tag.strategy_id === strategy.id)
-    }));
-  }, [strategies, dashboardTags]);
-
-  const activeStrategies = strategiesWithTags?.filter(s => s.status === 'active' && !s.is_hidden) || [];
-  const closedStrategies = strategiesWithTags?.filter(s => s.status === 'closed' && !s.is_hidden) || [];
+  const activeStrategies = strategies?.filter(s => s.status === 'active' && !s.is_hidden) || [];
+  const closedStrategies = strategies?.filter(s => s.status === 'closed' && !s.is_hidden) || [];
 
   // --- Mutations ---
 
@@ -393,8 +372,6 @@ export default function Strategies() {
     );
   };
 
-  const isLoading = strategiesLoading || tagsLoading;
-
   return (
     <DashboardLayout>
       <div className="space-y-8 pb-10">
@@ -466,7 +443,7 @@ export default function Strategies() {
           </DialogContent>
         </Dialog>
 
-        {isLoading ? (
+        {strategiesLoading ? (
           <div className="text-center py-12">Loading strategies...</div>
         ) : (
           <>

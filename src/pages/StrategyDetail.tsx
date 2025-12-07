@@ -280,8 +280,18 @@ export default function StrategyDetail() {
                       <TableBody>
                         {openPositions.map(pos => {
                           const entryPrice = Math.abs(pos.amount / (pos.quantity * pos.multiplier));
-                          // P&L color logic
-                          const pnl = pos.unrealized_pnl || 0;
+                          
+                          // Determine sign manually
+                          let sign = 1;
+                          const actionUpper = pos.action.toUpperCase();
+                          if (actionUpper.includes('SELL') || actionUpper.includes('SHORT')) {
+                            sign = -1;
+                          }
+
+                          // Calculate P&L manually
+                          const mv = (pos.mark_price || 0) * (pos.quantity || 0) * (pos.multiplier || 100) * sign;
+                          const pnl = mv + pos.amount;
+
                           return (
                             <TableRow key={pos.id}>
                               <TableCell className="font-mono">{pos.symbol}</TableCell>
