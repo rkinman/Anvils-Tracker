@@ -20,11 +20,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Search, Loader2, Link as LinkIcon, Unlink, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { Search, Loader2, Link as LinkIcon, Unlink, ArrowUp, ArrowDown, ArrowUpDown, Tag } from "lucide-react";
 import { format } from "date-fns";
 import { showSuccess, showError } from "@/utils/toast";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuGroup, 
+  DropdownMenuItem, 
+  DropdownMenuLabel, 
+  DropdownMenuSeparator, 
+  DropdownMenuTrigger 
+} from "@/components/ui/dropdown-menu";
 
 // Define Trade type based on Supabase schema
 interface Trade {
@@ -118,7 +126,7 @@ export default function TradeHistory() {
   });
 
   // Fetch Strategies for the dropdown
-  const { data: strategies } = useQuery({
+  const { data: strategies } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['strategies-list'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -132,7 +140,7 @@ export default function TradeHistory() {
 
   // --- Mutations ---
 
-  // Mutation to update strategy
+  // Mutation to update strategy for a single trade
   const updateStrategyMutation = useMutation({
     mutationFn: async ({ tradeId, strategyId }: { tradeId: string, strategyId: string | null }) => {
       const { error } = await supabase
@@ -146,6 +154,32 @@ export default function TradeHistory() {
       queryClient.invalidateQueries({ queryKey: ['trades'] });
       queryClient.invalidateQueries({ queryKey: ['strategies'] });
       showSuccess("Trade updated");
+    },
+    onError: (err) => {
+      showError(err.message);
+    }
+  });
+
+  // Mutation to update strategy for multiple trades
+  const bulkUpdateStrategyMutation = useMutation({
+    mutationFn: async (strategyId: string | null) => {
+      if (selectedTrades.length === 0) {
+        throw new Error("No trades selected for bulk update.");
+      }
+      
+      const { error } = await supabase
+        .from('trades')
+        .update({ strategy_id: strategyId })
+        .in('id', selectedTrades);
+
+      if (error) throw error;
+    },
+    onSuccess: (data, strategyId) => {
+      queryClient.invalidateQueries({ queryKey: ['trades'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies'] });
+      setSelectedTrades([]);
+      const strategyName = strategies?.find(s => s.id === strategyId)?.name || 'Unassigned';
+      showSuccess(`Successfully assigned ${selectedTrades.length} trades to "${strategyName}".`);
     },
     onError: (err) => {
       showError(err.message);
@@ -204,6 +238,11 @@ export default function TradeHistory() {
   const handleStrategyChange = (tradeId: string, value: string) => {
     const strategyId = value === "none" ? null : value;
     updateStrategyMutation.mutate({ tradeId, strategyId });
+  };
+
+  const handleBulkStrategyChange = (strategyId: string) => {
+    const id = strategyId === "none" ? null : strategyId;
+    bulkUpdateStrategyMutation.mutate(id);
   };
 
   const handleSelectTrade = (tradeId: string, checked: boolean) => {
@@ -332,19 +371,48 @@ export default function TradeHistory() {
                   Bulk Actions ({selectedTrades.length})
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem 
-                  onClick={handleBulkPair} 
-                  disabled={pairTradesMutation.isPending}
-                >
-                  <LinkIcon className="mr-2 h-4 w-4" /> Pair Selected Trades
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  onClick={handleBulkUnpair} 
-                  disabled={unpairTradesMutation.isPending}
-                >
-                  <Unlink className="mr-2 h-4 w-4" /> Unpair Selected Trades
-                </DropdownMenuItem>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Pairing</DropdownMenuLabel>
+                  <DropdownMenuItem 
+                    onClick={handleBulkPair} 
+                    disabled={pairTradesMutation.isPending}
+                  >
+                    <LinkIcon className="mr-2 h-4 w-4" /> Pair Selected Trades
+                  </DropdownMenuItem>
+                  <DropdownMenuItem 
+                    onClick={handleBulkUnpair} 
+                    disabled={unpairTradesMutation.isPending}
+                  >
+                    <Unlink className="mr-2 h-4 w-4" /> Unpair Selected Trades
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+
+                <DropdownMenuSeparator />
+
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Assign Strategy</DropdownMenuLabel>
+                  <div className="p-2">
+                    <Select 
+                      onValueChange={handleBulkStrategyChange}
+                      disabled={bulkUpdateStrategyMutation.isPending || !strategies || strategies.length === 0}
+                    >
+                      <SelectTrigger className="w-full h-8">
+                        <SelectValue placeholder="Select Strategy" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none" className="text-muted-foreground">
+                          <Tag className="mr-2 h-4 w-4 inline-block" /> Unassign Strategy
+                        </SelectItem>
+                        {strategies?.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
