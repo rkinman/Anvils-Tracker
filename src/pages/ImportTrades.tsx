@@ -13,7 +13,7 @@ import { showSuccess, showError } from "@/utils/toast";
 
 export default function ImportTrades() {
   // State for Trade Imports
-  const [tradeLoading, setTradeLoading]_useState(false);
+  const [tradeLoading, setTradeLoading] = useState(false);
   const [tradeStats, setTradeStats] = useState<{ total: number; inserted: number; duplicates: number } | null>(null);
   const tradeFileInputRef = useRef<HTMLInputElement>(null);
 
