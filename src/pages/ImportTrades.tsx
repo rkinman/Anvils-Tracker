@@ -75,7 +75,6 @@ export default function ImportTrades() {
       const positionsMap = new Map(parsedPositions.map(p => [p.canonicalSymbol, p]));
 
       // 2. Fetch all currently "Open" trades from the database ledger
-      // We look for trades that aren't paired (custom logic) or have OPEN in the action
       const { data: openTrades, error: fetchError } = await supabase
         .from('trades')
         .select('*')
@@ -89,13 +88,10 @@ export default function ImportTrades() {
 
       // 3. Match Logic
       for (const trade of openTrades) {
-        // We use the trade history parser here to generate the key from the DB data
         const tradeCanonical = parseTradeSymbol(trade.symbol, trade.asset_type);
-        
         const position = positionsMap.get(tradeCanonical);
         
         if (position) {
-          // Found match: Update with live data from CSV
           updates.push({ 
             id: trade.id, 
             mark_price: position.mark,
@@ -105,9 +101,7 @@ export default function ImportTrades() {
         }
       }
       
-      // 4. Ghost Logic (Snapshot approach)
-      // Any trade we thought was open, but is NOT in the new file, is assumed closed/gone.
-      // We clear its live metrics.
+      // 4. Ghost Logic (Clear missing positions)
       const tradesToClear = openTrades.filter(t => !matchedTradeIds.has(t.id) && (t.mark_price !== null || t.unrealized_pnl !== null));
       for (const trade of tradesToClear) {
         updates.push({ 
@@ -117,24 +111,33 @@ export default function ImportTrades() {
         });
       }
 
-      // 5. Batch Update
+      // 5. Sequential Update Execution (Fix for 400 Bad Request)
       if (updates.length > 0) {
-        const updatePromises = updates.map(update =>
-          supabase
-            .from('trades')
-            .update({ 
-              mark_price: update.mark_price,
-              unrealized_pnl: update.unrealized_pnl 
-            })
-            .eq('id', update.id)
-        );
-        
-        const results = await Promise.all(updatePromises);
-        const failedUpdates = results.filter(res => res.error);
+        let successCount = 0;
+        let failCount = 0;
+        let firstError = null;
 
-        if (failedUpdates.length > 0) {
-          console.error('Some position updates failed:', failedUpdates);
-          throw new Error(`Failed to update ${failedUpdates.length} of ${updates.length} positions.`);
+        for (const update of updates) {
+            const { error } = await supabase
+              .from('trades')
+              .update({ 
+                mark_price: update.mark_price,
+                unrealized_pnl: update.unrealized_pnl 
+              })
+              .eq('id', update.id);
+            
+            if (error) {
+                console.error("Update failed for ID:", update.id, error);
+                failCount++;
+                if (!firstError) firstError = error;
+            } else {
+                successCount++;
+            }
+        }
+
+        if (failCount > 0) {
+            console.error("First update error:", firstError);
+            throw new Error(`Failed to update ${failCount} positions. Check console for details. Error: ${firstError?.message}`);
         }
       }
 
@@ -143,7 +146,7 @@ export default function ImportTrades() {
       showSuccess(`Updated ${matchedCount} positions. Cleared ${openTrades.length - matchedCount} missing positions.`);
 
     } catch (error: any) {
-      console.error(error);
+      console.error("Full error object:", error);
       showError(error.message || "Failed to process positions file.");
     } finally {
       setPositionLoading(false);
