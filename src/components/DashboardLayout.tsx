@@ -60,8 +60,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const navItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/" },
     { icon: PieChart, label: "Strategies", path: "/strategies" },
-    { icon: Upload, label: "Import Trades", path: "/import" },
-    { icon: CandlestickChart, label: "Positions", path: "/positions" },
+    { icon: Upload, label: "Import Data", path: "/import" },
     { icon: History, label: "Trade History", path: "/history" },
     { icon: Settings, label: "Settings", path: "/settings" },
   ];
