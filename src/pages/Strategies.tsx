@@ -5,7 +5,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Plus, Trash2, TrendingUp, Eye, Target, MoreHorizontal, Archive, RefreshCw, Pencil, Calculator, DollarSign, Activity } from "lucide-react";
+import { Plus, Trash2, TrendingUp, Eye, Target, MoreHorizontal, Archive, RefreshCw, Pencil, DollarSign, Clock, Percent } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +42,7 @@ interface Strategy {
   trade_count: number;
   win_count: number;
   loss_count: number;
+  days_in_trade: number;
   dashboard_tags?: any[];
 }
 
@@ -84,6 +85,22 @@ export default function Strategies() {
         let unrealized_pnl = 0;
         let win_count = 0;
         let loss_count = 0;
+        let days_in_trade = 0;
+
+        // Calculate Days in Trade
+        if (stratTrades.length > 0) {
+            const dates = stratTrades.map(t => new Date(t.date).getTime());
+            const minDate = Math.min(...dates);
+            
+            // If active, calc to Today. If closed, calc to last trade date.
+            const endDate = strategy.status === 'closed' ? Math.max(...dates) : Date.now();
+            
+            const diffTime = Math.max(0, endDate - minDate);
+            days_in_trade = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            // Ensure at least 1 day if it started today
+            if (days_in_trade === 0) days_in_trade = 1;
+        }
 
         stratTrades.forEach(trade => {
             const amount = Number(trade.amount);
@@ -95,21 +112,16 @@ export default function Strategies() {
                 const qty = Number(trade.quantity);
                 const mult = Number(trade.multiplier);
                 
-                // Determine sign: Long = +1, Short = -1
-                // Standard logic: Buy adds positive asset value, Sell adds negative liability value
                 const isShort = trade.action.toUpperCase().includes('SELL') || trade.action.toUpperCase().includes('SHORT');
                 const sign = isShort ? -1 : 1;
                 
                 marketValue = mark * qty * mult * sign;
                 
-                // Unrealized P&L for this specific trade = Current Value + Cost (Amount is usually negative for buys)
                 const tradeUnrealized = marketValue + amount;
-                unrealized_pnl += tradeUnrealized;
+                unrealizedPnL += tradeUnrealized;
             } else {
-                // If no mark price, it's considered closed/realized
                 realized_pnl += amount;
                 
-                // Estimate Win/Loss on realized trades
                 if (amount > 0) win_count++;
                 if (amount < 0) loss_count++;
             }
@@ -132,6 +144,7 @@ export default function Strategies() {
           trade_count: stratTrades.length,
           win_count,
           loss_count,
+          days_in_trade,
           dashboard_tags: strategyTags
         };
       });
@@ -143,7 +156,6 @@ export default function Strategies() {
   const activeStrategies = strategies?.filter(s => s.status === 'active' && !s.is_hidden) || [];
   const closedStrategies = strategies?.filter(s => s.status === 'closed' && !s.is_hidden) || [];
 
-  // --- Mutations (Rest of file unchanged, just re-exporting component logic) ---
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -202,7 +214,6 @@ export default function Strategies() {
     }
   });
 
-  // --- Handlers ---
   const handleCreate = () => {
     if (!formData.name) return showError("Name is required");
     createMutation.mutate(formData);
@@ -234,11 +245,6 @@ export default function Strategies() {
     const isTotalPositive = strategy.total_pnl >= 0;
     const roi = strategy.capital_allocation > 0 
       ? (strategy.total_pnl / strategy.capital_allocation) * 100 
-      : 0;
-    
-    const totalClosed = strategy.win_count + strategy.loss_count;
-    const winRate = totalClosed > 0
-      ? (strategy.win_count / totalClosed) * 100
       : 0;
 
     return (
@@ -299,11 +305,6 @@ export default function Strategies() {
               <span className={`text-3xl font-bold ${isTotalPositive ? 'text-green-500' : 'text-red-500'}`}>
                 {formatCurrency(strategy.total_pnl)}
               </span>
-              {strategy.capital_allocation > 0 && (
-                 <Badge variant={roi >= 0 ? "default" : "destructive"} className={roi >= 0 ? "bg-green-500/15 text-green-600 hover:bg-green-500/25 border-green-200" : ""}>
-                   {roi > 0 ? '+' : ''}{roi.toFixed(1)}% ROI
-                 </Badge>
-              )}
             </div>
           </div>
 
@@ -322,17 +323,19 @@ export default function Strategies() {
             </div>
             <div className="bg-muted/30 p-3 rounded-md">
               <span className="text-muted-foreground block text-xs mb-1 flex items-center gap-1">
-                <Calculator className="h-3 w-3" />
-                Allocated Capital
+                <Percent className="h-3 w-3" />
+                Return on Investment
               </span>
-              <span className="font-medium">{formatCurrency(strategy.capital_allocation)}</span>
+              <span className={`font-medium ${roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {strategy.capital_allocation > 0 ? `${roi > 0 ? '+' : ''}${roi.toFixed(2)}%` : 'N/A'}
+              </span>
             </div>
             <div className="bg-muted/30 p-3 rounded-md">
               <span className="text-muted-foreground block text-xs mb-1 flex items-center gap-1">
-                <Activity className="h-3 w-3" />
-                Trades / Win Rate
+                <Clock className="h-3 w-3" />
+                Days in Trade
               </span>
-              <span className="font-medium">{strategy.trade_count} / {winRate.toFixed(0)}%</span>
+              <span className="font-medium">{strategy.days_in_trade} days</span>
             </div>
           </div>
 
