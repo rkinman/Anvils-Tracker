@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { FloatingActionBar } from "@/components/FloatingActionBar";
 
 interface Trade {
   id: string;
@@ -945,31 +946,27 @@ export default function StrategyDetail() {
         </Card>
 
         {/* Floating Bulk Actions Bar */}
-        {selectedTradesForTagging.length > 0 && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-md px-4">
-            <div className="bg-card border border-border rounded-xl shadow-2xl p-3 flex items-center justify-between gap-4 animate-in slide-in-from-bottom-5 duration-300">
-              <span className="text-sm font-medium text-foreground whitespace-nowrap">
-                {selectedTradesForTagging.length} selected
-              </span>
-              <div className="flex items-center gap-2">
-                <Select onValueChange={handleBulkTagChange} disabled={bulkUpdateTagMutation.isPending}>
-                  <SelectTrigger className="w-[180px] h-9">
-                    <SelectValue placeholder="Assign Tag" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Tag</SelectItem>
-                    {tags?.map((tag) => (
-                      <SelectItem key={tag.id} value={tag.id}>{tag.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button variant="ghost" size="icon" onClick={() => setSelectedTradesForTagging([])}>
-                  <X className="h-5 w-5" />
-                </Button>
-              </div>
-            </div>
+        <FloatingActionBar isOpen={selectedTradesForTagging.length > 0}>
+          <span className="text-sm font-medium text-foreground whitespace-nowrap">
+            {selectedTradesForTagging.length} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <Select onValueChange={handleBulkTagChange} disabled={bulkUpdateTagMutation.isPending}>
+              <SelectTrigger className="w-[180px] h-9">
+                <SelectValue placeholder="Assign Tag" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No Tag</SelectItem>
+                {tags?.map((tag) => (
+                  <SelectItem key={tag.id} value={tag.id}>{tag.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="ghost" size="icon" onClick={() => setSelectedTradesForTagging([])}>
+              <X className="h-5 w-5" />
+            </Button>
           </div>
-        )}
+        </FloatingActionBar>
       </div>
     </DashboardLayout>
   );
