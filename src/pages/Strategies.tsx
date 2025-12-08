@@ -443,7 +443,7 @@ export default function Strategies() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-3 gap-3 text-sm">
             <div className="bg-muted/30 p-3 rounded-md">
               <span className="text-muted-foreground block text-xs mb-1 flex items-center gap-1">
                 <Percent className="h-3 w-3" />
@@ -473,12 +473,6 @@ export default function Strategies() {
                 Days in Trade
               </span>
               <span className="font-medium">{strategy.days_in_trade} days</span>
-            </div>
-             <div className="bg-muted/30 p-3 rounded-md">
-              <span className="text-muted-foreground block text-xs mb-1">Win Rate</span>
-              <span className="font-medium">
-                {strategy.trade_count > 0 ? Math.round((strategy.win_count / (strategy.win_count + strategy.loss_count || 1)) * 100) : 0}%
-              </span>
             </div>
           </div>
 
