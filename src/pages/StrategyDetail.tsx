@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { showSuccess, showError } from "@/utils/toast";
-import { Loader2, Save, Plus, ArrowLeft, Search, Tag, Trash2, ChevronDown, ChevronRight, Calculator, Link as LinkIcon, ArrowUp, ArrowDown, ArrowUpDown, BarChart3, X, Pencil } from "lucide-react";
+import { Loader2, Save, Plus, ArrowLeft, Search, Tag, Trash2, ChevronDown, ChevronRight, Calculator, Link as LinkIcon, ArrowUp, ArrowDown, ArrowUpDown, BarChart3, X, Pencil, Gauge } from "lucide-react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -291,6 +291,22 @@ export default function StrategyDetail() {
     onError: (err) => showError(err.message)
   });
 
+  const bulkUpdateMultiplierMutation = useMutation({
+    mutationFn: async (multiplier: number) => {
+      const { error } = await supabase
+        .from('trades')
+        .update({ multiplier })
+        .eq('strategy_id', strategyId);
+      if (error) throw error;
+    },
+    onSuccess: (_, multiplier) => {
+      queryClient.invalidateQueries({ queryKey: ['assignedTrades', strategyId] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
+      showSuccess(`All trade multipliers set to ${multiplier}`);
+    },
+    onError: (err) => showError(err.message)
+  });
+
   // --- HANDLERS ---
   const handleSave = () => updateStrategyMutation.mutate(formState);
   const handleAddSelected = () => assignTradesMutation.mutate(selectedUnassigned);
@@ -355,6 +371,24 @@ export default function StrategyDetail() {
       id: editingTrade.id,
       ...editForm
     });
+  };
+
+  const isFutures = useMemo(() => {
+    if (!assignedTrades || assignedTrades.length === 0) return false;
+    // We consider it "Futures Mode" if ALL trades have multiplier 50.
+    return assignedTrades.every(t => t.multiplier === 50);
+  }, [assignedTrades]);
+
+  const handleFuturesToggle = (checked: boolean) => {
+    if (checked) {
+      if (confirm("This will update ALL trades in this strategy to have a multiplier of 50. This is typically used for Futures contracts (e.g., /ES). Continue?")) {
+        bulkUpdateMultiplierMutation.mutate(50);
+      }
+    } else {
+      if (confirm("This will revert ALL trades in this strategy to a multiplier of 100 (Standard Options). Continue?")) {
+        bulkUpdateMultiplierMutation.mutate(100);
+      }
+    }
   };
 
   const filteredUnassignedTrades = useMemo(() => unassignedTrades?.filter(t => t.symbol.toLowerCase().includes(searchTerm.toLowerCase())), [unassignedTrades, searchTerm]);
@@ -566,19 +600,39 @@ export default function StrategyDetail() {
                       <Input id="benchmark" className="pl-9" value={formState.benchmark_ticker} onChange={(e) => setFormState({ ...formState, benchmark_ticker: e.target.value.toUpperCase() })} />
                      </div>
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="status">Strategy Status</Label>
+                    <div className="flex items-center space-x-2 h-10">
+                      <Switch 
+                        id="status" 
+                        checked={formState.status === 'active'} 
+                        onCheckedChange={(checked) => setFormState({ ...formState, status: checked ? 'active' : 'closed' })} 
+                      />
+                      <span className="text-sm text-muted-foreground">{formState.status === 'active' ? 'Active' : 'Closed'}</span>
+                    </div>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="description">Description</Label>
                   <Textarea id="description" value={formState.description} onChange={(e) => setFormState({ ...formState, description: e.target.value })} />
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Switch 
-                    id="status" 
-                    checked={formState.status === 'active'} 
-                    onCheckedChange={(checked) => setFormState({ ...formState, status: checked ? 'active' : 'closed' })} 
-                  />
-                  <Label htmlFor="status">Active Strategy</Label>
+
+                <div className="pt-2 border-t mt-4">
+                  <Label className="mb-2 block">Data Overrides</Label>
+                  <div className="flex items-center space-x-2">
+                    <Switch 
+                      id="futures-mode" 
+                      checked={isFutures} 
+                      onCheckedChange={handleFuturesToggle}
+                      disabled={bulkUpdateMultiplierMutation.isPending}
+                    />
+                    <div className="space-y-0.5">
+                      <Label htmlFor="futures-mode" className="text-base cursor-pointer">Futures Strategy (50x)</Label>
+                      <p className="text-xs text-muted-foreground">Force all trade multipliers to 50 (standard for ES/NQ/etc).</p>
+                    </div>
+                  </div>
                 </div>
+
               </CardContent>
               <CardFooter>
                 <Button onClick={handleSave} disabled={updateStrategyMutation.isPending}>
