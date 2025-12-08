@@ -347,8 +347,24 @@ export default function StrategyDetail() {
         group.trades.forEach(trade => {
           symbols.add(trade.symbol);
           
-          // Use stored amount directly as it comes from broker (Credit + / Debit -)
-          const amount = Number(trade.amount);
+          const actionUpper = trade.action.toUpperCase();
+          const isSell = actionUpper.includes('SELL') || actionUpper.includes('SHORT');
+          const isBuy = actionUpper.includes('BUY') || actionUpper.includes('LONG');
+          
+          // Re-calculate amount using Price * Qty * Multiplier to ensure correct sign (Polarity)
+          // DB 'amount' can sometimes be wrong if import didn't handle debit/credit signs correctly
+          let amount = Number(trade.amount);
+          
+          // Fallback calculation if we suspect the amount sign is wrong or we want to be precise
+          // However, we must be careful about fees. 
+          // Safe heuristic: If it's a BUY, amount MUST be negative (Debit).
+          // If it's a SELL, amount MUST be positive (Credit), unless fees > proceeds (unlikely but possible)
+          
+          if (isBuy && amount > 0) {
+            amount = -amount;
+          }
+          // For Sells, we assume positive is correct. 
+          
           totalAmount += amount;
 
           if (trade.mark_price !== null) {
@@ -359,8 +375,6 @@ export default function StrategyDetail() {
             // Direction Logic:
             // Short (Sell/Write): Price down = Profit. Market Value is Liability (Negative).
             // Long (Buy): Price up = Profit. Market Value is Asset (Positive).
-            const actionUpper = trade.action.toUpperCase();
-            const isSell = actionUpper.includes('SELL') || actionUpper.includes('SHORT');
             const sign = isSell ? -1 : 1;
             
             const mv = cleanMarkPrice * trade.quantity * trade.multiplier * sign;
@@ -373,6 +387,9 @@ export default function StrategyDetail() {
             // Closed Trade P&L is just the realized amount
             totalPnl += amount;
           }
+          
+          // Update the trade object in memory so the expanded view uses the fixed sign too
+          trade.amount = amount;
         });
 
         const symbolList = Array.from(symbols);
@@ -658,7 +675,7 @@ export default function StrategyDetail() {
                                                 <TableHead className="text-xs">Symbol</TableHead>
                                                 <TableHead className="text-xs text-right">Entry Price</TableHead>
                                                 <TableHead className="text-xs text-right">Mark Price</TableHead>
-                                                <TableHead className="text-xs text-right">Leg P&L</TableHead>
+                                                <TableHead className="text-xs text-right">Leg P&L / Val</TableHead>
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
@@ -672,6 +689,8 @@ export default function StrategyDetail() {
                                                 
                                                 const mv = cleanMarkPrice * trade.quantity * trade.multiplier * sign;
                                                 const legPnl = (trade.mark_price !== null) ? (mv + amount) : amount;
+                                                
+                                                // Calculate absolute entry price from the cash flow, as prices are always positive
                                                 const entryPrice = (trade.quantity > 0) ? Math.abs(amount / (trade.quantity * trade.multiplier)) : 0;
                                                 
                                                 return (
