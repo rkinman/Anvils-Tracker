@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { showSuccess, showError } from "@/utils/toast";
-import { Loader2, Save, Plus, ArrowLeft, Search, Tag, Trash2, ChevronDown, ChevronRight, Calculator, Link as LinkIcon, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { Loader2, Save, Plus, ArrowLeft, Search, Tag, Trash2, ChevronDown, ChevronRight, Calculator, Link as LinkIcon, ArrowUp, ArrowDown, ArrowUpDown, BarChart3 } from "lucide-react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -125,7 +125,7 @@ export default function StrategyDetail() {
     }
   });
 
-  const [formState, setFormState] = useState({ name: '', description: '', capital_allocation: '0', status: 'active' });
+  const [formState, setFormState] = useState({ name: '', description: '', capital_allocation: '0', status: 'active', benchmark_ticker: 'SPY' });
   
   useEffect(() => {
     if (strategy) {
@@ -133,7 +133,8 @@ export default function StrategyDetail() {
         name: strategy.name, 
         description: strategy.description || '',
         capital_allocation: strategy.capital_allocation || '0',
-        status: strategy.status || 'active'
+        status: strategy.status || 'active',
+        benchmark_ticker: strategy.benchmark_ticker || 'SPY'
       });
     }
   }, [strategy]);
@@ -181,6 +182,7 @@ export default function StrategyDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['strategy', strategyId] });
       queryClient.invalidateQueries({ queryKey: ['strategies'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
       showSuccess("Strategy updated");
     },
     onError: (err) => showError(err.message)
@@ -355,15 +357,9 @@ export default function StrategyDetail() {
           // DB 'amount' can sometimes be wrong if import didn't handle debit/credit signs correctly
           let amount = Number(trade.amount);
           
-          // Fallback calculation if we suspect the amount sign is wrong or we want to be precise
-          // However, we must be careful about fees. 
-          // Safe heuristic: If it's a BUY, amount MUST be negative (Debit).
-          // If it's a SELL, amount MUST be positive (Credit), unless fees > proceeds (unlikely but possible)
-          
           if (isBuy && amount > 0) {
             amount = -amount;
           }
-          // For Sells, we assume positive is correct. 
           
           totalAmount += amount;
 
@@ -371,17 +367,10 @@ export default function StrategyDetail() {
             isOpen = true;
             
             const cleanMarkPrice = Math.abs(trade.mark_price || 0);
-            
-            // Direction Logic:
-            // Short (Sell/Write): Price down = Profit. Market Value is Liability (Negative).
-            // Long (Buy): Price up = Profit. Market Value is Asset (Positive).
             const sign = isSell ? -1 : 1;
             
             const mv = cleanMarkPrice * trade.quantity * trade.multiplier * sign;
             totalMarketValue += mv;
-            
-            // P&L = Current Value + Cost Basis (Amount)
-            // Example Short: Sold @ 100 (Amt +100), Mark 90 (MV -90) -> P&L +10.
             totalPnl += (mv + amount);
           } else {
             // Closed Trade P&L is just the realized amount
@@ -448,6 +437,15 @@ export default function StrategyDetail() {
                       <Calculator className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input id="cap" type="number" className="pl-9" value={formState.capital_allocation} onChange={(e) => setFormState({ ...formState, capital_allocation: e.target.value })} />
                     </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="space-y-2">
+                    <Label htmlFor="benchmark">Benchmark Ticker</Label>
+                     <div className="relative">
+                      <BarChart3 className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input id="benchmark" className="pl-9" value={formState.benchmark_ticker} onChange={(e) => setFormState({ ...formState, benchmark_ticker: e.target.value.toUpperCase() })} />
+                     </div>
                   </div>
                 </div>
                 <div className="space-y-2">

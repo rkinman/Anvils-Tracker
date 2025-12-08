@@ -5,7 +5,7 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Plus, Trash2, TrendingUp, Eye, Target, MoreHorizontal, Archive, RefreshCw, Pencil, DollarSign, Clock, Percent, AlertCircle } from "lucide-react";
+import { Plus, Trash2, TrendingUp, Eye, Target, MoreHorizontal, Archive, RefreshCw, Pencil, DollarSign, Clock, Percent, AlertCircle, BarChart3, RotateCw } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { showSuccess, showError } from "@/utils/toast";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { format } from "date-fns";
 
 interface Strategy {
   id: string;
@@ -36,6 +37,7 @@ interface Strategy {
   status: 'active' | 'closed';
   start_date: string | null;
   is_hidden: boolean;
+  benchmark_ticker: string;
   total_pnl: number;
   realized_pnl: number;
   unrealized_pnl: number;
@@ -44,13 +46,17 @@ interface Strategy {
   loss_count: number;
   days_in_trade: number;
   dashboard_tags?: any[];
+  first_trade_date?: string;
+  last_trade_date?: string;
+  benchmark_performance?: number;
 }
 
 export default function Strategies() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null);
-  const [formData, setFormData] = useState({ name: "", description: "", capital_allocation: "0" });
+  const [formData, setFormData] = useState({ name: "", description: "", capital_allocation: "0", benchmark_ticker: "SPY" });
+  const [isSyncing, setIsSyncing] = useState(false);
   
   const queryClient = useQueryClient();
 
@@ -64,10 +70,7 @@ export default function Strategies() {
           .from('strategies')
           .select('*');
         
-        if (stratError) {
-          console.error("Error fetching strategies:", stratError);
-          throw stratError;
-        }
+        if (stratError) throw stratError;
 
         if (!strategiesData || strategiesData.length === 0) {
           return [];
@@ -78,13 +81,11 @@ export default function Strategies() {
           .from('trades')
           .select('id, strategy_id, amount, date, mark_price, quantity, multiplier, action, hidden');
         
-        if (tradesError) {
-          console.error("Error fetching trades for calculation:", tradesError);
-        }
+        if (tradesError) console.error(tradesError);
 
         const safeTrades = tradesData || [];
 
-        // 3. Try Fetch Dashboard Tags (fail silently if view doesn't exist)
+        // 3. Try Fetch Dashboard Tags
         let dashboardTagsData: any[] = [];
         try {
           const { data, error } = await supabase
@@ -92,14 +93,17 @@ export default function Strategies() {
             .select('*')
             .eq('show_on_dashboard', true);
           
-          if (!error && data) {
-            dashboardTagsData = data;
-          }
+          if (!error && data) dashboardTagsData = data;
         } catch (err) {
-          console.warn("Could not fetch tag_performance, skipping tags section.", err);
+          console.warn("Could not fetch tag_performance", err);
         }
 
-        // 4. Calculate Metrics per Strategy
+        // 4. Fetch Benchmark Data
+        const { data: benchmarkData } = await supabase
+          .from('benchmark_prices')
+          .select('*');
+
+        // 5. Calculate Metrics per Strategy
         const calculatedStrategies = strategiesData.map(strategy => {
           const stratTrades = safeTrades.filter(t => t.strategy_id === strategy.id && !t.hidden);
           
@@ -109,8 +113,10 @@ export default function Strategies() {
           let win_count = 0;
           let loss_count = 0;
           let days_in_trade = 0;
+          let first_trade_date = null;
+          let last_trade_date = null;
 
-          // Calculate Days in Trade
+          // Calculate Days in Trade & Dates
           if (stratTrades.length > 0) {
               const dates = stratTrades
                 .map(t => t.date ? new Date(t.date).getTime() : NaN)
@@ -118,8 +124,11 @@ export default function Strategies() {
               
               if (dates.length > 0) {
                 const minDate = Math.min(...dates);
-                // If active, calc to Today. If closed, calc to last trade date.
-                const endDate = strategy.status === 'closed' ? Math.max(...dates) : Date.now();
+                first_trade_date = new Date(minDate).toISOString().split('T')[0];
+                const maxDate = Math.max(...dates);
+                last_trade_date = new Date(maxDate).toISOString().split('T')[0];
+
+                const endDate = strategy.status === 'closed' ? maxDate : Date.now();
                 const diffTime = Math.max(0, endDate - minDate);
                 days_in_trade = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
                 if (days_in_trade === 0) days_in_trade = 1;
@@ -128,20 +137,15 @@ export default function Strategies() {
 
           stratTrades.forEach(trade => {
               const amount = Number(trade.amount) || 0;
-              
-              // Market Value Calculation
               let marketValue = 0;
               if (trade.mark_price !== null && trade.mark_price !== undefined) {
                   const mark = Math.abs(Number(trade.mark_price));
                   const qty = Number(trade.quantity) || 0;
                   const mult = Number(trade.multiplier) || 1; 
-                  
                   const actionStr = trade.action ? trade.action.toUpperCase() : '';
                   const isShort = actionStr.includes('SELL') || actionStr.includes('SHORT');
                   const sign = isShort ? -1 : 1;
-                  
                   marketValue = mark * qty * mult * sign;
-                  
                   const tradeUnrealized = marketValue + amount;
                   unrealized_pnl += tradeUnrealized;
               } else {
@@ -151,10 +155,37 @@ export default function Strategies() {
               }
           });
 
-          // Total P&L = Realized + Unrealized
           total_pnl = realized_pnl + unrealized_pnl;
-
           const strategyTags = dashboardTagsData.filter(t => t.strategy_id === strategy.id);
+
+          // Calculate Benchmark Performance
+          let benchmarkPerformance = 0;
+          const ticker = strategy.benchmark_ticker || 'SPY';
+          
+          if (first_trade_date && benchmarkData) {
+            // Since data in DB is normalized to 100 at the fetch date, we need to compare two points
+            // Find price closest to first_trade_date
+            const stratPrices = benchmarkData
+              .filter((b: any) => b.ticker === ticker)
+              .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            
+            if (stratPrices.length > 0) {
+              // Find entry price (closest date >= first_trade_date)
+              // Since it's sorted, find first
+              const startPriceObj = stratPrices.find((p: any) => p.date >= first_trade_date);
+              
+              // Find end price (closest date <= today or last_trade_date if closed)
+              const endDateToCheck = strategy.status === 'closed' ? last_trade_date : new Date().toISOString().split('T')[0];
+              // Reverse find for end price
+              const endPriceObj = [...stratPrices].reverse().find((p: any) => p.date <= endDateToCheck);
+
+              if (startPriceObj && endPriceObj && Number(startPriceObj.price) > 0) {
+                 const startP = Number(startPriceObj.price);
+                 const endP = Number(endPriceObj.price);
+                 benchmarkPerformance = ((endP - startP) / startP) * 100;
+              }
+            }
+          }
 
           return {
             ...strategy,
@@ -162,6 +193,7 @@ export default function Strategies() {
             status: strategy.status || 'active',
             start_date: strategy.start_date,
             is_hidden: strategy.is_hidden || false,
+            benchmark_ticker: ticker,
             total_pnl,
             realized_pnl,
             unrealized_pnl,
@@ -169,7 +201,10 @@ export default function Strategies() {
             win_count,
             loss_count,
             days_in_trade,
-            dashboard_tags: strategyTags
+            dashboard_tags: strategyTags,
+            first_trade_date,
+            last_trade_date,
+            benchmark_performance: benchmarkPerformance
           };
         });
 
@@ -193,6 +228,7 @@ export default function Strategies() {
         name: data.name,
         description: data.description,
         capital_allocation: parseFloat(data.capital_allocation) || 0,
+        benchmark_ticker: data.benchmark_ticker.toUpperCase() || 'SPY',
         user_id: user.id
       });
       if (error) throw error;
@@ -200,7 +236,7 @@ export default function Strategies() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
       setIsCreateOpen(false);
-      setFormData({ name: "", description: "", capital_allocation: "0" });
+      setFormData({ name: "", description: "", capital_allocation: "0", benchmark_ticker: "SPY" });
       showSuccess("Strategy created successfully!");
     },
     onError: (error) => showError(error.message)
@@ -222,7 +258,8 @@ export default function Strategies() {
       const { error } = await supabase.from('strategies').update({
         name: data.name,
         description: data.description,
-        capital_allocation: parseFloat(data.capital_allocation) || 0
+        capital_allocation: parseFloat(data.capital_allocation) || 0,
+        benchmark_ticker: data.benchmark_ticker.toUpperCase()
       }).eq('id', data.id);
       if (error) throw error;
     },
@@ -257,9 +294,51 @@ export default function Strategies() {
     setFormData({
       name: strategy.name,
       description: strategy.description || "",
-      capital_allocation: strategy.capital_allocation?.toString() || "0"
+      capital_allocation: strategy.capital_allocation?.toString() || "0",
+      benchmark_ticker: strategy.benchmark_ticker || "SPY"
     });
     setIsEditOpen(true);
+  };
+
+  const handleSyncBenchmarks = async () => {
+    if (!strategies || strategies.length === 0) {
+      showError("No strategies to sync.");
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      // Find the global earliest date needed
+      const validDates = strategies
+        .map(s => s.first_trade_date ? new Date(s.first_trade_date).getTime() : NaN)
+        .filter(d => !isNaN(d));
+
+      if (validDates.length === 0) {
+        showSuccess("No trades found to benchmark against.");
+        setIsSyncing(false);
+        return;
+      }
+
+      const minDateMs = Math.min(...validDates);
+      // Go back a few days just in case to capture market opens
+      const startDate = new Date(minDateMs - 86400000 * 3).toISOString().split('T')[0];
+      
+      const tickers = Array.from(new Set(strategies.map(s => s.benchmark_ticker || 'SPY')));
+
+      const { data, error } = await supabase.functions.invoke('fetch-benchmarks', {
+        body: { tickers, startDate }
+      });
+
+      if (error) throw error;
+
+      showSuccess(data?.message || "Benchmarks synced successfully");
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
+    } catch (error: any) {
+      console.error("Sync error:", error);
+      showError(error.message || "Failed to sync benchmarks");
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { 
@@ -274,6 +353,9 @@ export default function Strategies() {
     const roi = strategy.capital_allocation > 0 
       ? (strategy.total_pnl / strategy.capital_allocation) * 100 
       : 0;
+    
+    const benchmarkRoi = strategy.benchmark_performance || 0;
+    const roiDiff = roi - benchmarkRoi;
 
     return (
       <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200 border-l-4" style={{
@@ -338,18 +420,6 @@ export default function Strategies() {
 
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="bg-muted/30 p-3 rounded-md">
-              <span className="text-muted-foreground block text-xs mb-1">Realized P&L</span>
-              <span className={`font-bold ${strategy.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {formatCurrency(strategy.realized_pnl)}
-              </span>
-            </div>
-            <div className="bg-muted/30 p-3 rounded-md">
-              <span className="text-muted-foreground block text-xs mb-1">Unrealized P&L</span>
-              <span className={`font-bold ${strategy.unrealized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {formatCurrency(strategy.unrealized_pnl)}
-              </span>
-            </div>
-            <div className="bg-muted/30 p-3 rounded-md">
               <span className="text-muted-foreground block text-xs mb-1 flex items-center gap-1">
                 <Percent className="h-3 w-3" />
                 Return on Investment
@@ -358,12 +428,32 @@ export default function Strategies() {
                 {strategy.capital_allocation > 0 ? `${roi > 0 ? '+' : ''}${roi.toFixed(2)}%` : 'N/A'}
               </span>
             </div>
+             <div className="bg-muted/30 p-3 rounded-md">
+              <span className="text-muted-foreground block text-xs mb-1 flex items-center gap-1">
+                <BarChart3 className="h-3 w-3" />
+                vs {strategy.benchmark_ticker}
+              </span>
+              <div className="flex flex-col">
+                <span className="font-medium text-xs text-muted-foreground">
+                  Benchmark: <span className={benchmarkRoi >= 0 ? 'text-green-600/70' : 'text-red-600/70'}>{benchmarkRoi > 0 ? '+' : ''}{benchmarkRoi.toFixed(2)}%</span>
+                </span>
+                <span className={`text-xs font-bold ${roiDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                   Alpha: {roiDiff > 0 ? '+' : ''}{roiDiff.toFixed(2)}%
+                </span>
+              </div>
+            </div>
             <div className="bg-muted/30 p-3 rounded-md">
               <span className="text-muted-foreground block text-xs mb-1 flex items-center gap-1">
                 <Clock className="h-3 w-3" />
                 Days in Trade
               </span>
               <span className="font-medium">{strategy.days_in_trade} days</span>
+            </div>
+             <div className="bg-muted/30 p-3 rounded-md">
+              <span className="text-muted-foreground block text-xs mb-1">Win Rate</span>
+              <span className="font-medium">
+                {strategy.trade_count > 0 ? Math.round((strategy.win_count / (strategy.win_count + strategy.loss_count || 1)) * 100) : 0}%
+              </span>
             </div>
           </div>
 
@@ -407,9 +497,15 @@ export default function Strategies() {
             <h2 className="text-3xl font-bold tracking-tight">Strategies</h2>
             <p className="text-muted-foreground">Manage your trading campaigns and track performance.</p>
           </div>
-          <Button onClick={() => { setFormData({ name: "", description: "", capital_allocation: "0" }); setIsCreateOpen(true); }}>
-            <Plus className="mr-2 h-4 w-4" /> New Strategy
-          </Button>
+          <div className="flex gap-2">
+             <Button variant="outline" onClick={handleSyncBenchmarks} disabled={isSyncing}>
+                <RotateCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                {isSyncing ? "Syncing..." : "Sync Benchmarks"}
+              </Button>
+            <Button onClick={() => { setFormData({ name: "", description: "", capital_allocation: "0", benchmark_ticker: "SPY" }); setIsCreateOpen(true); }}>
+              <Plus className="mr-2 h-4 w-4" /> New Strategy
+            </Button>
+          </div>
         </div>
 
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
@@ -422,10 +518,15 @@ export default function Strategies() {
                 <Label htmlFor="name">Strategy Name *</Label>
                 <Input id="name" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} placeholder="e.g., TSLA Wheel Strategy" />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="cap">Allocated Capital ($)</Label>
-                <Input id="cap" type="number" value={formData.capital_allocation} onChange={(e) => setFormData({...formData, capital_allocation: e.target.value})} placeholder="10000" />
-                <p className="text-xs text-muted-foreground">Used to calculate ROI percentage.</p>
+              <div className="grid grid-cols-2 gap-4">
+                 <div className="space-y-2">
+                  <Label htmlFor="cap">Allocated Capital ($)</Label>
+                  <Input id="cap" type="number" value={formData.capital_allocation} onChange={(e) => setFormData({...formData, capital_allocation: e.target.value})} placeholder="10000" />
+                </div>
+                 <div className="space-y-2">
+                  <Label htmlFor="benchmark">Benchmark Ticker</Label>
+                  <Input id="benchmark" value={formData.benchmark_ticker} onChange={(e) => setFormData({...formData, benchmark_ticker: e.target.value.toUpperCase()})} placeholder="SPY" />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="desc">Description</Label>
@@ -451,9 +552,15 @@ export default function Strategies() {
                 <Label htmlFor="edit-name">Strategy Name</Label>
                 <Input id="edit-name" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-cap">Allocated Capital ($)</Label>
-                <Input id="edit-cap" type="number" value={formData.capital_allocation} onChange={(e) => setFormData({...formData, capital_allocation: e.target.value})} />
+               <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-cap">Allocated Capital ($)</Label>
+                  <Input id="edit-cap" type="number" value={formData.capital_allocation} onChange={(e) => setFormData({...formData, capital_allocation: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-benchmark">Benchmark Ticker</Label>
+                  <Input id="edit-benchmark" value={formData.benchmark_ticker} onChange={(e) => setFormData({...formData, benchmark_ticker: e.target.value.toUpperCase()})} />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-desc">Description</Label>
