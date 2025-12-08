@@ -74,14 +74,12 @@ export default function Strategies() {
         }
 
         // 2. Fetch All Trades (needed for accurate aggregation)
-        // We only fetch fields we absolutely need to keep it lighter
         const { data: tradesData, error: tradesError } = await supabase
           .from('trades')
           .select('id, strategy_id, amount, date, mark_price, quantity, multiplier, action, hidden');
         
         if (tradesError) {
           console.error("Error fetching trades for calculation:", tradesError);
-          // Don't crash, just proceed with empty trades if this fails (unlikely)
         }
 
         const safeTrades = tradesData || [];
@@ -103,7 +101,6 @@ export default function Strategies() {
 
         // 4. Calculate Metrics per Strategy
         const calculatedStrategies = strategiesData.map(strategy => {
-          // Robust filtering
           const stratTrades = safeTrades.filter(t => t.strategy_id === strategy.id && !t.hidden);
           
           let total_pnl = 0;
@@ -137,7 +134,7 @@ export default function Strategies() {
               if (trade.mark_price !== null && trade.mark_price !== undefined) {
                   const mark = Math.abs(Number(trade.mark_price));
                   const qty = Number(trade.quantity) || 0;
-                  const mult = Number(trade.multiplier) || 1; // Default to 1 if missing
+                  const mult = Number(trade.multiplier) || 1; 
                   
                   const actionStr = trade.action ? trade.action.toUpperCase() : '';
                   const isShort = actionStr.includes('SELL') || actionStr.includes('SHORT');
@@ -146,7 +143,7 @@ export default function Strategies() {
                   marketValue = mark * qty * mult * sign;
                   
                   const tradeUnrealized = marketValue + amount;
-                  unrealizedPnL += tradeUnrealized;
+                  unrealized_pnl += tradeUnrealized;
               } else {
                   realized_pnl += amount;
                   if (amount > 0) win_count++;
