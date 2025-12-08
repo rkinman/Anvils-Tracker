@@ -2,11 +2,13 @@ import { useMemo } from "react";
 import {
   Area,
   AreaChart,
+  Line,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
+  Legend
 } from "recharts";
 import { format } from "date-fns";
 
@@ -16,33 +18,15 @@ interface Trade {
 }
 
 interface DashboardChartProps {
-  trades?: Trade[];
-  data?: { date: string; value: number }[];
+  data?: { date: string; value: number; benchmarkValue?: number }[];
+  showBenchmark?: boolean;
 }
 
-export function DashboardChart({ trades, data }: DashboardChartProps) {
+export function DashboardChart({ data, showBenchmark }: DashboardChartProps) {
   const chartData = useMemo(() => {
-    // If manual data is provided, sort it and use it
-    if (data && data.length > 0) {
-      return [...data].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    }
-
-    // Fallback to trade-based calculation if no manual data
-    if (!trades || trades.length === 0) return [];
-
-    const sortedTrades = [...trades].sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-
-    let cumulative = 0;
-    return sortedTrades.map((trade) => {
-      cumulative += Number(trade.amount);
-      return {
-        date: trade.date,
-        value: cumulative,
-      };
-    });
-  }, [trades, data]);
+    if (!data || data.length === 0) return [];
+    return [...data].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [data]);
 
   if (chartData.length === 0) {
     return (
@@ -52,7 +36,7 @@ export function DashboardChart({ trades, data }: DashboardChartProps) {
     );
   }
 
-  // Determine color based on start vs end value
+  // Determine color based on start vs end value of the portfolio
   const startValue = chartData[0]?.value || 0;
   const endValue = chartData[chartData.length - 1]?.value || 0;
   const isPositive = endValue >= startValue;
@@ -73,6 +57,10 @@ export function DashboardChart({ trades, data }: DashboardChartProps) {
                 stopColor={isPositive ? "#10b981" : "#ef4444"}
                 stopOpacity={0}
               />
+            </linearGradient>
+            <linearGradient id="colorBenchmark" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
@@ -100,17 +88,33 @@ export function DashboardChart({ trades, data }: DashboardChartProps) {
               borderRadius: "var(--radius)",
             }}
             labelFormatter={(value) => format(new Date(value), "MMM d, yyyy")}
-            formatter={(value: number) => [
+            formatter={(value: number, name: string) => [
               new Intl.NumberFormat("en-US", {
                 style: "currency",
                 currency: "USD",
               }).format(value),
-              "Net Liquidity",
+              name === "value" ? "Net Liquidity" : "SPY Equivalent"
             ]}
           />
+          <Legend />
+          
+          {showBenchmark && (
+            <Area
+              type="monotone"
+              dataKey="benchmarkValue"
+              name="SPY Equivalent"
+              stroke="#3b82f6"
+              strokeWidth={2}
+              fillOpacity={1}
+              fill="url(#colorBenchmark)"
+              strokeDasharray="5 5"
+            />
+          )}
+
           <Area
             type="monotone"
             dataKey="value"
+            name="Net Liquidity"
             stroke={isPositive ? "#10b981" : "#ef4444"}
             strokeWidth={2}
             fillOpacity={1}

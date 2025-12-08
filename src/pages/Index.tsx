@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Activity, DollarSign, TrendingUp, Wallet, PieChart, PlusCircle, AlertTriangle } from "lucide-react";
+import { Activity, DollarSign, TrendingUp, Wallet, PieChart, PlusCircle, AlertTriangle, ArrowUpRight, ArrowDownLeft, ArrowDownRight, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,11 +20,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { showSuccess, showError } from "@/utils/toast";
+import { Switch } from "@/components/ui/switch";
+import { format } from "date-fns";
 
 const Index = () => {
   const queryClient = useQueryClient();
   const [isEntryOpen, setIsEntryOpen] = useState(false);
+  const [isFlowOpen, setIsFlowOpen] = useState(false);
   const [netLiqAmount, setNetLiqAmount] = useState("");
+  const [flowAmount, setFlowAmount] = useState("");
+  const [flowType, setFlowType] = useState<'deposit' | 'withdrawal'>('deposit');
+  const [showSpy, setShowSpy] = useState(false);
   
   // Date logic
   const today = new Date();
@@ -32,7 +38,9 @@ const Index = () => {
   const currentHour = today.getHours();
   const isAfter4PM = currentHour >= 16; // 4 PM
 
-  // Fetch Net Liquidity Logs (Manual)
+  // --- QUERIES ---
+
+  // 1. Fetch Net Liquidity Logs
   const { data: netLiqLogs, isLoading: logsLoading } = useQuery({
     queryKey: ['net-liq-logs'],
     queryFn: async () => {
@@ -45,7 +53,37 @@ const Index = () => {
     }
   });
 
-  // Fetch Trade Stats (Calculated)
+  // 2. Fetch Capital Flows (Deposits/Withdrawals)
+  const { data: capitalFlows, isLoading: flowsLoading } = useQuery({
+    queryKey: ['capital-flows'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('capital_flows')
+        .select('*')
+        .order('date', { ascending: true });
+      if (error) throw error;
+      return data;
+    }
+  });
+
+  // 3. Fetch SPY Benchmark Data
+  const { data: spyData, isLoading: spyLoading } = useQuery({
+    queryKey: ['spy-benchmark-dashboard'],
+    queryFn: async () => {
+      // Get the earliest date we need (from logs)
+      // We fetch all available SPY data for simplicity and filter client-side
+      const { data, error } = await supabase
+        .from('benchmark_prices')
+        .select('*')
+        .eq('ticker', 'SPY')
+        .order('date', { ascending: true });
+      
+      if (error) throw error;
+      return data;
+    }
+  });
+
+  // 4. Fetch Trade Stats (Calculated)
   const { data: tradeStats, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard-stats-v2'],
     queryFn: async () => {
@@ -83,6 +121,8 @@ const Index = () => {
     }
   });
 
+  // --- MUTATIONS ---
+
   const upsertNetLiqMutation = useMutation({
     mutationFn: async (amount: string) => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -110,11 +150,148 @@ const Index = () => {
     onError: (err) => showError(err.message)
   });
 
-  const handleSaveNetLiq = () => {
-    upsertNetLiqMutation.mutate(netLiqAmount);
-  };
+  const flowMutation = useMutation({
+    mutationFn: async ({ amount, type }: { amount: string, type: 'deposit' | 'withdrawal' }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
 
-  if (statsLoading || logsLoading) {
+      const numAmount = parseFloat(amount);
+      if (isNaN(numAmount)) throw new Error("Invalid amount");
+      
+      const finalAmount = type === 'deposit' ? Math.abs(numAmount) : -Math.abs(numAmount);
+
+      const { error } = await supabase
+        .from('capital_flows')
+        .insert({ 
+          user_id: user.id, 
+          date: todayStr, 
+          amount: finalAmount 
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['capital-flows'] });
+      setIsFlowOpen(false);
+      setFlowAmount("");
+      showSuccess("Capital flow recorded");
+    },
+    onError: (err) => showError(err.message)
+  });
+
+  const syncSpyMutation = useMutation({
+    mutationFn: async () => {
+      if (!netLiqLogs || netLiqLogs.length === 0) throw new Error("No data to sync against");
+      
+      const startDate = netLiqLogs[0].date;
+      const { data, error } = await supabase.functions.invoke('fetch-benchmarks', {
+        body: { tickers: ['SPY'], startDate }
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['spy-benchmark-dashboard'] });
+      showSuccess("Synced SPY data successfully");
+    },
+    onError: (err) => showError(err.message || "Failed to sync")
+  });
+
+  // --- LOGIC ---
+
+  const handleSaveNetLiq = () => upsertNetLiqMutation.mutate(netLiqAmount);
+  const handleSaveFlow = () => flowMutation.mutate({ amount: flowAmount, type: flowType });
+
+  // Calculate Chart Data & Metrics
+  const { chartData, currentNetLiq, totalPnL, pnlChangeToday, totalReturnPct } = useMemo(() => {
+    if (!netLiqLogs || netLiqLogs.length === 0) return { chartData: [], currentNetLiq: 0, totalPnL: 0, pnlChangeToday: 0, totalReturnPct: 0 };
+
+    // 1. Prepare base map of logs
+    const logsMap = new Map(netLiqLogs.map(l => [l.date, Number(l.amount)]));
+    const sortedDates = netLiqLogs.map(l => l.date).sort();
+    const startDate = sortedDates[0];
+    const latestDate = sortedDates[sortedDates.length - 1];
+    const latestValue = logsMap.get(latestDate) || 0;
+
+    // 2. Aggregate Flows
+    // Total Invested Capital starts as the FIRST log entry value (assuming it was the initial deposit)
+    // PLUS any subsequent flows from capital_flows table.
+    // NOTE: If the first log entry was just tracking starting at $0, then we rely on capital_flows.
+    // For simplicity: We treat the first Log Value as "Initial Capital" if no flow exists on that day.
+    const initialCapital = logsMap.get(startDate) || 0;
+    
+    // Calculate total net flows (Deposits - Withdrawals)
+    const totalFlows = capitalFlows?.reduce((sum, flow) => sum + Number(flow.amount), 0) || 0;
+    
+    // Adjusted P&L = Current Value - (Initial Capital + Net Flows AFTER start date)
+    // We exclude flows on start date if we assume Initial Capital covers it, but to be safe, 
+    // let's assume Initial Capital is the snapshot. 
+    // A robust P&L is: CurrentValue - (Sum of ALL Deposits - Sum of ALL Withdrawals)
+    // BUT we don't have historical deposits for the first entry.
+    // So: Total Invested = InitialCapital + (Flows happening AFTER start date).
+    const flowsAfterStart = capitalFlows?.filter(f => f.date > startDate).reduce((sum, f) => sum + Number(f.amount), 0) || 0;
+    
+    const totalInvested = initialCapital + flowsAfterStart;
+    const totalPnL = latestValue - totalInvested;
+    const totalReturnPct = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
+
+    // 3. Calculate Change Since Last Update
+    // Look for previous log entry
+    let pnlChangeToday = 0;
+    if (sortedDates.length >= 2) {
+      const prevDate = sortedDates[sortedDates.length - 2];
+      const prevValue = logsMap.get(prevDate) || 0;
+      // Adjust for any flows that happened exactly on the latest date
+      const flowsOnLatestDate = capitalFlows?.filter(f => f.date === latestDate).reduce((sum, f) => sum + Number(f.amount), 0) || 0;
+      
+      // Change = (Today - TodayFlows) - Yesterday
+      pnlChangeToday = (latestValue - flowsOnLatestDate) - prevValue;
+    }
+
+    // 4. Build Chart Data with Benchmark
+    const data = netLiqLogs.map(log => {
+      const date = log.date;
+      const value = Number(log.amount);
+      let benchmarkValue = undefined;
+
+      if (spyData && spyData.length > 0) {
+         // Find SPY price on this date
+         const spyPriceObj = spyData.find((d: any) => d.date === date);
+         // Find SPY price on start date (baseline)
+         const spyStartObj = spyData.find((d: any) => d.date === startDate);
+         
+         // If we have both, calculate hypothetical value
+         // Formula: PortfolioStartValue * (CurrentSPY / StartSPY)
+         // We also need to adjust for capital flows to be accurate (Time Weighted), 
+         // but for a simple visual comparison: "If I invested my starting capital in SPY"
+         // This ignores subsequent deposits for the benchmark line, which is a limitation but standard for simple charts.
+         if (spyPriceObj && spyStartObj && Number(spyStartObj.price) > 0) {
+            const spyStart = Number(spyStartObj.price);
+            const spyCurr = Number(spyPriceObj.price); // Note: DB stores normalized price, but ratio holds true
+            benchmarkValue = initialCapital * (spyCurr / spyStart);
+            
+            // NOTE: If we want to account for deposits in the benchmark line, we'd need to loop and add (Flow * SPY_Change_Since_Flow).
+            // That's complex. Sticking to simple "Initial Capital vs SPY" comparison.
+         }
+      }
+
+      return {
+        date,
+        value,
+        benchmarkValue
+      };
+    });
+
+    return { chartData: data, currentNetLiq: latestValue, totalPnL, pnlChangeToday, totalReturnPct };
+  }, [netLiqLogs, capitalFlows, spyData]);
+
+  const loading = statsLoading || logsLoading || flowsLoading || spyLoading;
+
+  // Check if today's entry exists
+  const hasEntryForToday = netLiqLogs?.some(log => log.date === todayStr);
+  const showWarning = isAfter4PM && !hasEntryForToday;
+
+  if (loading) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-[50vh]">
@@ -124,20 +301,6 @@ const Index = () => {
     );
   }
 
-  // Prepare Chart Data
-  const chartData = netLiqLogs?.map(log => ({
-    date: log.date,
-    value: Number(log.amount)
-  })) || [];
-
-  // Determine current Net Liq
-  const latestLog = netLiqLogs && netLiqLogs.length > 0 ? netLiqLogs[netLiqLogs.length - 1] : null;
-  const currentNetLiq = latestLog ? Number(latestLog.amount) : 0;
-
-  // Check if today's entry exists
-  const hasEntryForToday = netLiqLogs?.some(log => log.date === todayStr);
-  const showWarning = isAfter4PM && !hasEntryForToday;
-
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -146,16 +309,16 @@ const Index = () => {
             <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
             <p className="text-muted-foreground">Overview of your trading performance.</p>
           </div>
-          <div className="flex gap-2">
-             <Button onClick={() => setIsEntryOpen(true)} variant="outline">
+          <div className="flex flex-wrap gap-2">
+             <Button onClick={() => setIsFlowOpen(true)} variant="outline">
+                <Wallet className="mr-2 h-4 w-4" /> Deposit / Withdraw
+             </Button>
+             <Button onClick={() => setIsEntryOpen(true)} variant="default">
                 <PlusCircle className="mr-2 h-4 w-4" /> Update Net Liq
              </Button>
-            <Button asChild variant="default">
-               <Link to="/import">Import Data</Link>
-            </Button>
-            <Button asChild variant="secondary">
-               <Link to="/strategies">Manage Strategies</Link>
-            </Button>
+             <Button asChild variant="secondary">
+                <Link to="/import">Import Data</Link>
+             </Button>
           </div>
         </div>
 
@@ -182,27 +345,35 @@ const Index = () => {
               <div className="text-2xl font-bold text-foreground">
                 {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(currentNetLiq)}
               </div>
-              <p className="text-xs text-muted-foreground">
-                {latestLog ? `Updated ${latestLog.date}` : "No data recorded"}
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                 {pnlChangeToday >= 0 ? <ArrowUpRight className="h-3 w-3 text-green-500" /> : <ArrowDownRight className="h-3 w-3 text-red-500" />}
+                 <span className={pnlChangeToday >= 0 ? "text-green-500" : "text-red-500"}>
+                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', signDisplay: "always" }).format(pnlChangeToday)}
+                 </span>
+                 {' '}since last update
               </p>
             </CardContent>
           </Card>
           
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Positions</CardTitle>
-              <Activity className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Total Growth</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{tradeStats?.activePositions || 0}</div>
-              <p className="text-xs text-muted-foreground">Open Trades / Legs</p>
+              <div className={ `text-2xl font-bold ${totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}` }>
+                {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', signDisplay: "always" }).format(totalPnL)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                 {totalReturnPct.toFixed(2)}% Return (Adj. for deposits)
+              </p>
             </CardContent>
           </Card>
           
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Win Rate</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              <Activity className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{tradeStats?.winRate || 0}%</div>
@@ -212,29 +383,43 @@ const Index = () => {
           
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Trades</CardTitle>
+              <CardTitle className="text-sm font-medium">Active Trades</CardTitle>
               <PieChart className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{tradeStats?.tradeCount || 0}</div>
-              <p className="text-xs text-muted-foreground">Transactions imported</p>
+              <div className="text-2xl font-bold">{tradeStats?.activePositions || 0}</div>
+              <p className="text-xs text-muted-foreground">Open legs tracked</p>
             </CardContent>
           </Card>
         </div>
 
         <div className="grid gap-4 md:grid-cols-1">
           <Card>
-            <CardHeader>
-              <CardTitle>Net Liquidity Performance</CardTitle>
-              <CardDescription>Manual daily tracking of account value.</CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                 <CardTitle>Portfolio Performance</CardTitle>
+                 <CardDescription>Net Liquidity over time vs SPY benchmark.</CardDescription>
+              </div>
+              <div className="flex items-center gap-4">
+                 <div className="flex items-center space-x-2">
+                    <Switch id="show-spy" checked={showSpy} onCheckedChange={setShowSpy} />
+                    <Label htmlFor="show-spy">Compare SPY</Label>
+                 </div>
+                 {showSpy && (
+                    <Button size="sm" variant="ghost" onClick={() => syncSpyMutation.mutate()} disabled={syncSpyMutation.isPending} title="Sync SPY Data">
+                       <RefreshCw className={`h-4 w-4 ${syncSpyMutation.isPending ? 'animate-spin' : ''}`} />
+                    </Button>
+                 )}
+              </div>
             </CardHeader>
             <CardContent className="pl-0">
-               <DashboardChart data={chartData} />
+               <DashboardChart data={chartData} showBenchmark={showSpy} />
             </CardContent>
           </Card>
         </div>
       </div>
 
+      {/* Net Liq Dialog */}
       <Dialog open={isEntryOpen} onOpenChange={setIsEntryOpen}>
         <DialogContent>
           <DialogHeader>
@@ -254,12 +439,62 @@ const Index = () => {
                 onChange={(e) => setNetLiqAmount(e.target.value)}
                 autoFocus
               />
+              <p className="text-xs text-muted-foreground">This will overwrite any existing value for today.</p>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEntryOpen(false)}>Cancel</Button>
             <Button onClick={handleSaveNetLiq} disabled={upsertNetLiqMutation.isPending || !netLiqAmount}>
               {upsertNetLiqMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deposit/Withdraw Dialog */}
+      <Dialog open={isFlowOpen} onOpenChange={setIsFlowOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Capital Flow</DialogTitle>
+            <DialogDescription>
+              Record a deposit or withdrawal. This ensures your performance metrics remain accurate.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+             <div className="flex gap-4">
+                <Button 
+                   type="button" 
+                   variant={flowType === 'deposit' ? 'default' : 'outline'} 
+                   className="flex-1"
+                   onClick={() => setFlowType('deposit')}
+                >
+                   <ArrowDownLeft className="mr-2 h-4 w-4" /> Deposit
+                </Button>
+                <Button 
+                   type="button" 
+                   variant={flowType === 'withdrawal' ? 'default' : 'outline'} 
+                   className="flex-1"
+                   onClick={() => setFlowType('withdrawal')}
+                >
+                   <ArrowUpRight className="mr-2 h-4 w-4" /> Withdraw
+                </Button>
+             </div>
+            <div className="space-y-2">
+              <Label htmlFor="flowAmount">Amount ($)</Label>
+              <Input 
+                id="flowAmount" 
+                type="number" 
+                placeholder="e.g. 5000"
+                value={flowAmount}
+                onChange={(e) => setFlowAmount(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsFlowOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveFlow} disabled={flowMutation.isPending || !flowAmount}>
+              {flowMutation.isPending ? "Recording..." : "Record Transaction"}
             </Button>
           </DialogFooter>
         </DialogContent>
