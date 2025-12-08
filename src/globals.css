@@ -439,35 +439,53 @@
     --ring: 121 100% 39%;
   }
 
-  /* Christmas Theme */
+  /* Christmas Theme (Wallpaper Inspired) */
   .christmas {
-    --background: 160 30% 5%; /* Very dark green */
-    --foreground: 0 0% 95%; /* Snow white */
-    --card: 160 30% 8%;
-    --card-foreground: 0 0% 95%;
-    --popover: 160 30% 8%;
-    --popover-foreground: 0 0% 95%;
-    --primary: 350 80% 55%; /* Festive Red */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 140 60% 30%; /* Pine Green */
+    --background: 0 0% 0%; /* Black base */
+    --foreground: 46 70% 95%; /* Light Gold text */
+    
+    /* Dark semi-transparent cards to show wallpaper */
+    --card: 0 0% 5%;
+    --card-foreground: 46 70% 95%;
+    
+    --popover: 0 0% 8%;
+    --popover-foreground: 46 70% 95%;
+    
+    /* Elegant Gold from the ornaments */
+    --primary: 46 65% 52%; /* Gold #d4af37 */
+    --primary-foreground: 0 0% 5%;
+    
+    /* Deep Red from the ornaments */
+    --secondary: 350 80% 20%; /* Dark Red #5c0e0e */
     --secondary-foreground: 0 0% 100%;
-    --muted: 160 20% 15%;
-    --muted-foreground: 160 20% 65%;
-    --accent: 45 90% 50%; /* Gold ornaments */
-    --accent-foreground: 0 0% 5%;
-    --destructive: 0 90% 60%;
+    
+    --muted: 0 0% 15%;
+    --muted-foreground: 45 20% 70%;
+    
+    /* Pine Green accent */
+    --accent: 141 47% 19%; /* #1a472a */
+    --accent-foreground: 46 70% 95%;
+    
+    --destructive: 0 70% 50%;
     --destructive-foreground: 0 0% 100%;
-    --border: 160 30% 20%;
-    --input: 160 30% 20%;
-    --ring: 350 80% 55%;
+    
+    --border: 46 65% 20%; /* Dark Gold border */
+    --input: 0 0% 15%;
+    --ring: 46 65% 52%;
   }
   
   body.christmas {
-    background-image: 
-      radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-      radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px);
-    background-size: 50px 50px, 30px 30px;
-    background-position: 0 0, 25px 25px;
+    background-image: url('/christmas-bg.jpg');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+  }
+
+  /* Make the app container semi-transparent so the wallpaper shows through */
+  .christmas .min-h-screen.bg-background {
+    background-color: rgba(0, 0, 0, 0.7); /* Dark overlay */
+    backdrop-filter: blur(3px); /* Subtle blur for readability */
   }
 }
 
