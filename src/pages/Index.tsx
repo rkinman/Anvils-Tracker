@@ -30,29 +30,36 @@ const Index = () => {
 
       // Calculate Metrics
       trades.forEach(trade => {
+        // Use stored amount (Cash Flow)
         const amount = Number(trade.amount);
-        
-        // Handle Open Positions (Unrealized P&L)
+        const actionUpper = trade.action.toUpperCase();
+
         if (trade.mark_price !== null) {
-          const mark = Math.abs(Number(trade.mark_price));
+          // Open Position Logic (Unrealized)
+          // P&L = Market Value + Cash Flow
+          
+          const cleanMarkPrice = Math.abs(Number(trade.mark_price));
           const qty = Number(trade.quantity);
           const mult = Number(trade.multiplier);
           
-          // Sign Logic: Short (Sell) = -1, Long (Buy) = +1
-          const isShort = trade.action.toUpperCase().includes('SELL') || trade.action.toUpperCase().includes('SHORT');
-          const sign = isShort ? -1 : 1;
+          // Determine Position Direction for Market Value
+          // Short (Sell to Open) = Negative Liability
+          // Long (Buy to Open) = Positive Asset
+          const isShort = actionUpper.includes('SELL') || actionUpper.includes('SHORT');
+          const posSign = isShort ? -1 : 1;
           
-          const marketValue = mark * qty * mult * sign;
+          const marketValue = cleanMarkPrice * qty * mult * posSign;
+          const tradeUnrealized = marketValue + amount;
           
-          // For open trades, P&L = Current Value + Cost Basis (Amount)
-          totalPnL += (marketValue + amount);
-          unrealizedPnL += (marketValue + amount);
+          totalPnL += tradeUnrealized;
+          unrealizedPnL += tradeUnrealized;
         } else {
-          // Closed Logic
+          // Closed Position Logic (Realized)
           totalPnL += amount;
           realizedPnL += amount;
 
-          if (trade.action.toUpperCase().includes('CLOSE') || trade.action.toUpperCase().includes('EXP')) {
+          // Estimate Win Rate on Closing Trades
+          if (actionUpper.includes('CLOSE') || actionUpper.includes('EXP')) {
              closeCount++;
              if (amount > 0) winCount++;
              else if (amount < 0) lossCount++;
@@ -65,6 +72,10 @@ const Index = () => {
       const winRate = closeCount > 0 
         ? Math.round((winCount / closeCount) * 100) 
         : 0;
+      
+      // Filter trades for the chart: Only show CLOSED trades (Realized P&L)
+      // Including open trades (cash flow) creates misleading charts (e.g. buying stock looks like a crash)
+      const realizedTrades = trades.filter(t => t.mark_price === null);
 
       return {
         totalPnL,
@@ -73,7 +84,7 @@ const Index = () => {
         activePositions: openCount,
         winRate,
         tradeCount: trades.length,
-        trades: trades
+        chartTrades: realizedTrades
       };
     }
   });
@@ -159,10 +170,10 @@ const Index = () => {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
           <Card className="col-span-4 lg:col-span-7">
             <CardHeader>
-              <CardTitle>Cash P&L Performance</CardTitle>
+              <CardTitle>Realized P&L Performance</CardTitle>
             </CardHeader>
             <CardContent className="pl-0">
-               <DashboardChart trades={stats?.trades || []} />
+               <DashboardChart trades={stats?.chartTrades || []} />
             </CardContent>
           </Card>
         </div>
