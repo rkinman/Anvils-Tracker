@@ -79,23 +79,22 @@ export default function Strategies() {
         // 2. Fetch All Trades (needed for accurate aggregation)
         const { data: tradesData, error: tradesError } = await supabase
           .from('trades')
-          .select('id, strategy_id, amount, date, mark_price, quantity, multiplier, action, hidden');
+          .select('id, strategy_id, amount, date, mark_price, quantity, multiplier, action, hidden, tag_id');
         
         if (tradesError) console.error(tradesError);
 
         const safeTrades = tradesData || [];
 
-        // 3. Try Fetch Dashboard Tags
-        let dashboardTagsData: any[] = [];
+        // 3. Fetch Tags (for client-side calculation)
+        let tagsData: any[] = [];
         try {
           const { data, error } = await supabase
-            .from('tag_performance')
-            .select('*')
-            .eq('show_on_dashboard', true);
+            .from('tags')
+            .select('*');
           
-          if (!error && data) dashboardTagsData = data;
+          if (!error && data) tagsData = data;
         } catch (err) {
-          console.warn("Could not fetch tag_performance", err);
+          console.warn("Could not fetch tags", err);
         }
 
         // 4. Fetch Benchmark Data
@@ -135,9 +134,9 @@ export default function Strategies() {
               }
           }
 
-          stratTrades.forEach(trade => {
+          // Helper logic for P&L calc (reused for Strategy and Tags)
+          const calculateTradePnl = (trade: any) => {
               const amount = Number(trade.amount) || 0;
-              let marketValue = 0;
               if (trade.mark_price !== null && trade.mark_price !== undefined) {
                   const mark = Math.abs(Number(trade.mark_price));
                   const qty = Number(trade.quantity) || 0;
@@ -145,18 +144,44 @@ export default function Strategies() {
                   const actionStr = trade.action ? trade.action.toUpperCase() : '';
                   const isShort = actionStr.includes('SELL') || actionStr.includes('SHORT');
                   const sign = isShort ? -1 : 1;
-                  marketValue = mark * qty * mult * sign;
-                  const tradeUnrealized = marketValue + amount;
-                  unrealized_pnl += tradeUnrealized;
+                  const marketValue = mark * qty * mult * sign;
+                  return marketValue + amount; // Unrealized P&L
               } else {
-                  realized_pnl += amount;
-                  if (amount > 0) win_count++;
-                  if (amount < 0) loss_count++;
+                  return amount; // Realized P&L
+              }
+          };
+
+          stratTrades.forEach(trade => {
+              const pnl = calculateTradePnl(trade);
+              const isUnrealized = trade.mark_price !== null && trade.mark_price !== undefined;
+              
+              if (isUnrealized) {
+                  unrealized_pnl += pnl;
+              } else {
+                  realized_pnl += pnl;
+                  if (pnl > 0) win_count++;
+                  if (pnl < 0) loss_count++;
               }
           });
 
           total_pnl = realized_pnl + unrealized_pnl;
-          const strategyTags = dashboardTagsData.filter(t => t.strategy_id === strategy.id);
+
+          // Calculate Tag Performance Client-Side
+          const stratTags = tagsData.filter(t => t.strategy_id === strategy.id);
+          const dashboard_tags = stratTags.map(tag => {
+             const tagTrades = stratTrades.filter(t => t.tag_id === tag.id);
+             let tagTotalPnl = 0;
+             tagTrades.forEach(t => {
+                 tagTotalPnl += calculateTradePnl(t);
+             });
+             return {
+                 tag_id: tag.id,
+                 tag_name: tag.name,
+                 total_pnl: tagTotalPnl,
+                 show_on_dashboard: tag.show_on_dashboard
+             };
+          }).filter(t => t.show_on_dashboard);
+
 
           // Calculate Benchmark Performance
           let benchmarkPerformance = 0;
@@ -201,7 +226,7 @@ export default function Strategies() {
             win_count,
             loss_count,
             days_in_trade,
-            dashboard_tags: strategyTags,
+            dashboard_tags,
             first_trade_date,
             last_trade_date,
             benchmark_performance: benchmarkPerformance

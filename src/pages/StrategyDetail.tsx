@@ -208,6 +208,7 @@ export default function StrategyDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tags', strategyId] });
       queryClient.invalidateQueries({ queryKey: ['dashboardTags'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
     },
     onError: (err) => showError(err.message)
   });
@@ -218,6 +219,7 @@ export default function StrategyDetail() {
       queryClient.invalidateQueries({ queryKey: ['tags', strategyId] });
       queryClient.invalidateQueries({ queryKey: ['assignedTrades', strategyId] });
       queryClient.invalidateQueries({ queryKey: ['dashboardTags'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
       showSuccess("Tag deleted");
     },
     onError: (err) => showError(err.message)
@@ -229,6 +231,7 @@ export default function StrategyDetail() {
       queryClient.invalidateQueries({ queryKey: ['assignedTrades', strategyId] });
       queryClient.invalidateQueries({ queryKey: ['unassignedTrades'] });
       queryClient.invalidateQueries({ queryKey: ['strategies'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
       showSuccess(`Assigned ${tradeIds.length} trades`);
       setSelectedUnassigned([]);
       setIsAddTradesOpen(false);
@@ -244,6 +247,7 @@ export default function StrategyDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignedTrades', strategyId] });
       queryClient.invalidateQueries({ queryKey: ['strategies'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
       showSuccess("Trade tag updated");
     },
     onError: (err) => showError(err.message)
@@ -257,6 +261,7 @@ export default function StrategyDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignedTrades', strategyId] });
       queryClient.invalidateQueries({ queryKey: ['strategies'] });
+      queryClient.invalidateQueries({ queryKey: ['strategies-calculated'] });
       showSuccess(`Updated tags for ${selectedTradesForTagging.length} trades`);
       setSelectedTradesForTagging([]);
     },
@@ -336,14 +341,14 @@ export default function StrategyDetail() {
     });
 
     // Group by tag
-    const groups: Record<string, { name: string; trades: TradeGroup[] }> = {};
+    const groups: Record<string, { name: string; trades: TradeGroup[]; totalPnl: number }> = {};
 
     sortedTrades.forEach(trade => {
       const tagId = trade.tag_id || 'untagged';
       const tagName = trade.tags?.name || 'Untagged Trades';
 
       if (!groups[tagId]) {
-        groups[tagId] = { name: tagName, trades: [] };
+        groups[tagId] = { name: tagName, trades: [], totalPnl: 0 };
       }
 
       // Create trade groups (pairs vs singles)
@@ -373,6 +378,8 @@ export default function StrategyDetail() {
 
     // Calculate summaries for each group
     Object.values(groups).forEach(tagGroup => {
+      let tagTotalPnl = 0;
+
       tagGroup.trades.forEach(group => {
         let totalAmount = 0;
         let totalMarketValue = 0;
@@ -433,8 +440,11 @@ export default function StrategyDetail() {
           totalPnl,
           isOpen
         };
+
+        tagTotalPnl += totalPnl;
       });
 
+      tagGroup.totalPnl = tagTotalPnl;
       // Sort groups within each tag by date
       tagGroup.trades.sort((a, b) => new Date(b.summary.date).getTime() - new Date(a.summary.date).getTime());
     });
@@ -612,10 +622,16 @@ export default function StrategyDetail() {
 
                   return (
                   <div key={tagId}>
-                    <h3 className="text-xl font-semibold mb-3 text-primary/90 flex items-center gap-2">
-                      <Tag className="h-5 w-5" />
-                      {tagGroup.name} ({tagGroup.trades.length} positions)
-                    </h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-xl font-semibold text-primary/90 flex items-center gap-2">
+                        <Tag className="h-5 w-5" />
+                        {tagGroup.name} 
+                        <span className="text-muted-foreground text-sm font-normal ml-1">({tagGroup.trades.length} positions)</span>
+                      </h3>
+                      <div className={cn("text-lg font-bold font-mono", tagGroup.totalPnl >= 0 ? "text-green-600" : "text-red-600")}>
+                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(tagGroup.totalPnl)}
+                      </div>
+                    </div>
                     <div className="border rounded-md overflow-hidden">
                       <Table>
                         <TableHeader>
