@@ -415,6 +415,29 @@
     --input: 220 10% 90%;
     --ring: 340 60% 85%;
   }
+
+  /* Legend Theme (Robinhood Legend Inspired) */
+  .legend {
+    --background: 0 0% 4%; /* #0a0a0a - Near Black */
+    --foreground: 0 0% 100%;
+    --card: 0 0% 10%; /* #1a1a1a */
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 121 100% 39%; /* Robinhood Green #00c805 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 20%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 20%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 0 0% 20%;
+    --accent-foreground: 121 100% 39%;
+    --destructive: 0 100% 50%; /* Red */
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 121 100% 39%;
+  }
 }
 
 @layer base {
