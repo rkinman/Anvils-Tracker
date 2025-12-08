@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
@@ -47,6 +47,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { FloatingActionBar } from "@/components/FloatingActionBar";
+
+// Custom Fragment wrapper to swallow extra props like data-dyad-id
+const TradeGroupWrapper = ({ children, ...props }: { children: React.ReactNode; [key: string]: any }) => {
+  return <>{children}</>;
+};
 
 // Define Trade type based on Supabase schema
 interface Trade {
@@ -483,7 +488,7 @@ export default function TradeHistory() {
                             const isExpanded = expandedPairs.has(trade.pair_id);
 
                             return (
-                              <Fragment key={trade.pair_id}>
+                              <TradeGroupWrapper key={trade.pair_id}>
                                 <TableRow data-state={someInPairSelected && "selected"} className="bg-muted/30 font-medium">
                                   <TableCell><Checkbox checked={allInPairSelected ? true : (someInPairSelected ? 'indeterminate' : false)} onCheckedChange={(checked) => handleSelectPair(pairTradeIds, !!checked)} /></TableCell>
                                   <TableCell className="min-w-[120px]">{format(new Date(firstDate), 'MMM d, yyyy')}</TableCell>
@@ -522,7 +527,7 @@ export default function TradeHistory() {
                                     <TableCell colSpan={3}></TableCell>
                                   </TableRow>
                                 ))}
-                              </Fragment>
+                              </TradeGroupWrapper>
                             );
                           } else {
                             return (
