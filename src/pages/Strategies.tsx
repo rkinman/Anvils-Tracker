@@ -389,11 +389,11 @@ export default function Strategies() {
         <CardHeader className="pb-3">
           <div className="flex justify-between items-start">
             <div className="space-y-1 flex-1">
-              <CardTitle className="text-lg flex items-center gap-2">
+              <CardTitle className="text-xl flex items-center gap-2">
                 {strategy.name}
                 {strategy.status === 'closed' && <Badge variant="secondary" className="text-xs">Closed</Badge>}
               </CardTitle>
-              <CardDescription className="line-clamp-2 text-xs">
+              <CardDescription className="line-clamp-2 text-sm">
                 {strategy.description || "No description provided"}
               </CardDescription>
             </div>
@@ -432,62 +432,62 @@ export default function Strategies() {
         
         <CardContent className="flex-1 pb-4 space-y-4">
           <div className="bg-gradient-to-br from-muted/50 to-muted/20 rounded-lg p-4">
-            <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-              <DollarSign className="h-3 w-3" />
+            <div className="text-sm text-muted-foreground mb-1 flex items-center gap-1">
+              <DollarSign className="h-4 w-4" />
               Total P&L (Net Liquidation)
             </div>
             <div className="flex items-baseline gap-3">
-              <span className={`text-3xl font-bold ${isTotalPositive ? 'text-green-500' : 'text-red-500'}`}>
+              <span className={`text-4xl font-bold ${isTotalPositive ? 'text-green-500' : 'text-red-500'}`}>
                 {formatCurrency(strategy.total_pnl)}
               </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="bg-muted/30 p-3 rounded-md">
-              <span className="text-muted-foreground block text-xs mb-1 flex items-center gap-1">
-                <Percent className="h-3 w-3" />
-                Return on Investment
+              <span className="text-muted-foreground block text-sm mb-1 flex items-center gap-1">
+                <Percent className="h-4 w-4" />
+                ROI
               </span>
-              <span className={`font-medium ${roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              <span className={`text-lg font-bold ${roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                 {strategy.capital_allocation > 0 ? `${roi > 0 ? '+' : ''}${roi.toFixed(2)}%` : 'N/A'}
               </span>
             </div>
              <div className="bg-muted/30 p-3 rounded-md">
-              <span className="text-muted-foreground block text-xs mb-1 flex items-center gap-1">
-                <BarChart3 className="h-3 w-3" />
+              <span className="text-muted-foreground block text-sm mb-1 flex items-center gap-1">
+                <BarChart3 className="h-4 w-4" />
                 vs {strategy.benchmark_ticker}
               </span>
               <div className="flex flex-col">
-                <span className="font-medium text-xs text-muted-foreground">
-                  Benchmark: <span className={benchmarkRoi >= 0 ? 'text-green-600/70' : 'text-red-600/70'}>{benchmarkRoi > 0 ? '+' : ''}{benchmarkRoi.toFixed(2)}%</span>
+                <span className="text-sm text-muted-foreground">
+                  Bench: <span className={benchmarkRoi >= 0 ? 'text-green-600/70' : 'text-red-600/70'}>{benchmarkRoi > 0 ? '+' : ''}{benchmarkRoi.toFixed(2)}%</span>
                 </span>
-                <span className={`text-xs font-bold ${roiDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                   Alpha: {roiDiff > 0 ? '+' : ''}{roiDiff.toFixed(2)}%
+                <span className={`text-lg font-bold ${roiDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                   {roiDiff > 0 ? '+' : ''}{roiDiff.toFixed(2)}%
                 </span>
               </div>
             </div>
             <div className="bg-muted/30 p-3 rounded-md">
-              <span className="text-muted-foreground block text-xs mb-1 flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                Days in Trade
+              <span className="text-muted-foreground block text-sm mb-1 flex items-center gap-1">
+                <Clock className="h-4 w-4" />
+                Duration
               </span>
-              <span className="font-medium">{strategy.days_in_trade} days</span>
+              <span className="text-lg font-bold">{strategy.days_in_trade} days</span>
             </div>
           </div>
 
           {strategy.dashboard_tags && strategy.dashboard_tags.length > 0 && (
             <div className="bg-muted/30 rounded-lg p-3 space-y-2">
-              <div className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                <Target className="h-3 w-3" /> Tag Breakdown
+              <div className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                <Target className="h-4 w-4" /> Tag Breakdown
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {strategy.dashboard_tags.map((tag: any) => (
-                  <div key={tag.tag_id} className="bg-background/80 p-2 rounded border shadow-sm">
-                    <div className="text-[10px] text-muted-foreground uppercase tracking-wider truncate mb-0.5" title={tag.tag_name}>
+                  <div key={tag.tag_id} className="bg-background/80 p-3 rounded border shadow-sm flex justify-between items-center">
+                    <div className="text-sm text-muted-foreground font-medium truncate" title={tag.tag_name}>
                       {tag.tag_name}
                     </div>
-                    <div className={`text-sm font-bold font-mono ${tag.total_pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    <div className={`text-base font-bold font-mono ${tag.total_pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                       {formatCurrency(tag.total_pnl)}
                     </div>
                   </div>
