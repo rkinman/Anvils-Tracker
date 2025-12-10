@@ -83,17 +83,15 @@ serve(async (req) => {
         
         if (historicalData.length === 0) continue;
 
-        const basePrice = historicalData[0].price;
-        if (basePrice === 0) continue;
-
-        const normalizedPrices = historicalData.map((item: { date: string; price: number }) => ({
+        // Note: We are storing RAW prices now, not normalized prices.
+        // This ensures consistency across multiple syncs with different start dates.
+        const pricesToInsert = historicalData.map((item: { date: string; price: number }) => ({
           user_id: userId,
           date: item.date,
           ticker: ticker.toUpperCase(),
-          // Storing normalized price (base 100 at start)
-          price: (item.price / basePrice) * 100, 
+          price: item.price, 
         }));
-        allPricesToInsert.push(...normalizedPrices);
+        allPricesToInsert.push(...pricesToInsert);
 
       } catch (fetchError) {
         console.error(`Error fetching ${ticker}:`, fetchError);
