@@ -382,7 +382,6 @@ export default function Strategies() {
       : 0;
     
     const benchmarkRoi = strategy.benchmark_performance || 0;
-    const roiDiff = roi - benchmarkRoi;
 
     // Actions dropdown menu reused in both views
     const ActionsMenu = () => (
@@ -462,9 +461,9 @@ export default function Strategies() {
              </div>
 
              <div className="text-right min-w-[60px] hidden md:block">
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground block">vs {strategy.benchmark_ticker}</span>
-                <span className={`font-medium text-sm ${roiDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                   {roiDiff > 0 ? '+' : ''}{roiDiff.toFixed(1)}%
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground block">{strategy.benchmark_ticker}</span>
+                <span className={`font-medium text-sm ${benchmarkRoi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                   {benchmarkRoi > 0 ? '+' : ''}{benchmarkRoi.toFixed(1)}%
                 </span>
              </div>
 
@@ -530,16 +529,11 @@ export default function Strategies() {
              <div className="bg-muted/30 p-3 rounded-md">
               <span className="text-muted-foreground block text-sm mb-1 flex items-center gap-1">
                 <BarChart3 className="h-4 w-4" />
-                vs {strategy.benchmark_ticker}
+                {strategy.benchmark_ticker}
               </span>
-              <div className="flex flex-col">
-                <span className="text-sm text-muted-foreground">
-                  Bench: <span className={benchmarkRoi >= 0 ? 'text-green-600/70' : 'text-red-600/70'}>{benchmarkRoi > 0 ? '+' : ''}{benchmarkRoi.toFixed(2)}%</span>
-                </span>
-                <span className={`text-lg font-bold ${roiDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                   {roiDiff > 0 ? '+' : ''}{roiDiff.toFixed(2)}%
-                </span>
-              </div>
+              <span className={`text-lg font-bold ${benchmarkRoi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                   {benchmarkRoi > 0 ? '+' : ''}{benchmarkRoi.toFixed(2)}%
+              </span>
             </div>
             <div className="bg-muted/30 p-3 rounded-md">
               <span className="text-muted-foreground block text-sm mb-1 flex items-center gap-1">
