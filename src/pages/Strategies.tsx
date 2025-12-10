@@ -28,6 +28,7 @@ import { showSuccess, showError } from "@/utils/toast";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 
 interface Strategy {
   id: string;
@@ -374,7 +375,7 @@ export default function Strategies() {
     maximumFractionDigits: 2
   }).format(val);
 
-  const StrategyCard = ({ strategy }: { strategy: Strategy }) => {
+  const StrategyCard = ({ strategy, viewMode }: { strategy: Strategy, viewMode: 'grid' | 'list' }) => {
     const isTotalPositive = strategy.total_pnl >= 0;
     const roi = strategy.capital_allocation > 0 
       ? (strategy.total_pnl / strategy.capital_allocation) * 100 
@@ -382,6 +383,95 @@ export default function Strategies() {
     
     const benchmarkRoi = strategy.benchmark_performance || 0;
     const roiDiff = roi - benchmarkRoi;
+
+    // Actions dropdown menu reused in both views
+    const ActionsMenu = () => (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8">
+            <span className="sr-only">Open menu</span>
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => openEdit(strategy)}>
+            <Pencil className="mr-2 h-4 w-4" /> Edit Details
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {strategy.status === 'active' ? (
+            <DropdownMenuItem onClick={() => updateStatusMutation.mutate({ id: strategy.id, status: 'closed' })}>
+              <Archive className="mr-2 h-4 w-4" /> Close Strategy
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onClick={() => updateStatusMutation.mutate({ id: strategy.id, status: 'active' })}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Re-open Strategy
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { 
+            if(confirm('Delete this strategy? This action cannot be undone.')) deleteMutation.mutate(strategy.id) 
+          }}>
+            <Trash2 className="mr-2 h-4 w-4" /> Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+
+    if (viewMode === 'list') {
+      return (
+        <Card 
+          className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-4 border-l-4 transition-all hover:shadow-md" 
+          style={{ borderLeftColor: isTotalPositive ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)' }}
+        >
+          {/* Info Section */}
+          <div className="flex-1 min-w-0">
+             <div className="flex items-center gap-2 mb-1">
+                <span className="font-semibold text-lg truncate">{strategy.name}</span>
+                {strategy.status === 'closed' && <Badge variant="secondary" className="text-xs h-5">Closed</Badge>}
+             </div>
+             <p className="text-sm text-muted-foreground line-clamp-1">{strategy.description || "No description"}</p>
+          </div>
+
+          {/* Metrics Section - Horizontal Layout */}
+          <div className="flex items-center gap-6 shrink-0 border-t pt-2 sm:border-t-0 sm:pt-0">
+             <div className="text-right">
+                <span className="text-xs text-muted-foreground block">Net Liq</span>
+                <span className={`font-bold ${isTotalPositive ? 'text-green-500' : 'text-red-500'}`}>
+                  {formatCurrency(strategy.total_pnl)}
+                </span>
+             </div>
+             
+             <div className="text-right min-w-[60px]">
+                <span className="text-xs text-muted-foreground block">ROI</span>
+                <span className={`font-medium ${roi >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                   {strategy.capital_allocation > 0 ? `${roi > 0 ? '+' : ''}${roi.toFixed(1)}%` : '-'}
+                </span>
+             </div>
+
+             <div className="text-right min-w-[80px] hidden md:block">
+                <span className="text-xs text-muted-foreground block">vs {strategy.benchmark_ticker}</span>
+                <span className={`font-medium ${roiDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                   {roiDiff > 0 ? '+' : ''}{roiDiff.toFixed(1)}%
+                </span>
+             </div>
+
+             <div className="text-right min-w-[60px] hidden lg:block">
+                <span className="text-xs text-muted-foreground block">Days</span>
+                <span className="font-medium">{strategy.days_in_trade}</span>
+             </div>
+          </div>
+
+          {/* Actions Section */}
+          <div className="flex items-center gap-2 sm:border-l sm:pl-4 justify-end">
+             <Button asChild size="sm" variant="ghost">
+                <Link to={`/strategies/${strategy.id}`}>View</Link>
+             </Button>
+             <ActionsMenu />
+          </div>
+        </Card>
+      );
+    }
 
     return (
       <Card className="flex flex-col h-full hover:shadow-lg transition-all duration-200 border-l-4" style={{
@@ -398,36 +488,7 @@ export default function Strategies() {
                 {strategy.description || "No description provided"}
               </CardDescription>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-8 w-8 p-0">
-                  <span className="sr-only">Open menu</span>
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => openEdit(strategy)}>
-                  <Pencil className="mr-2 h-4 w-4" /> Edit Details
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                {strategy.status === 'active' ? (
-                  <DropdownMenuItem onClick={() => updateStatusMutation.mutate({ id: strategy.id, status: 'closed' })}>
-                    <Archive className="mr-2 h-4 w-4" /> Close Strategy
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onClick={() => updateStatusMutation.mutate({ id: strategy.id, status: 'active' })}>
-                    <RefreshCw className="mr-2 h-4 w-4" /> Re-open Strategy
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { 
-                  if(confirm('Delete this strategy? This action cannot be undone.')) deleteMutation.mutate(strategy.id) 
-                }}>
-                  <Trash2 className="mr-2 h-4 w-4" /> Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ActionsMenu />
           </div>
         </CardHeader>
         
@@ -659,7 +720,7 @@ export default function Strategies() {
               ) : (
                 <div className={viewMode === 'grid' ? "grid gap-6 md:grid-cols-2 lg:grid-cols-3" : "grid gap-4 grid-cols-1"}>
                   {activeStrategies.map(strategy => (
-                    <StrategyCard key={strategy.id} strategy={strategy} />
+                    <StrategyCard key={strategy.id} strategy={strategy} viewMode={viewMode} />
                   ))}
                 </div>
               )}
@@ -677,7 +738,7 @@ export default function Strategies() {
                   
                   <div className={viewMode === 'grid' ? "grid gap-6 md:grid-cols-2 lg:grid-cols-3" : "grid gap-4 grid-cols-1"}>
                     {closedStrategies.map(strategy => (
-                      <StrategyCard key={strategy.id} strategy={strategy} />
+                      <StrategyCard key={strategy.id} strategy={strategy} viewMode={viewMode} />
                     ))}
                   </div>
                 </div>
