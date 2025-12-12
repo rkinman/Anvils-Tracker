@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
@@ -253,7 +253,7 @@ const Index = () => {
       let benchmarkValue = undefined;
 
       if (spyData && spyData.length > 0) {
-         // Find SPY price on this date
+         // Find SPY price on this date or most recent previous date
          const spyPriceObj = spyData.filter((d: any) => d.date <= date).pop();
          // Find SPY price on start date (baseline)
          const spyStartObj = spyData.filter((d: any) => d.date <= startDate).pop();
@@ -292,7 +292,7 @@ const Index = () => {
         console.log("Auto-syncing SPY data due to stale prices...");
         syncSpyMutation.mutate();
     }
-  }, [showSpy, netLiqLogs, spyData]);
+  }, [showSpy, netLiqLogs, spyData, syncSpyMutation, spyLoading]);
 
   const loading = statsLoading || logsLoading || flowsLoading || spyLoading;
 
