@@ -1,3 +1,4 @@
+base).">
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -354,8 +355,8 @@ const Index = () => {
               <div className="text-2xl font-bold text-foreground">
                 {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(currentNetLiq)}
               </div>
-              <p className="text-xs text-muted-foreground flex items-center gap-1">
-                 {pnlChangeToday >= 0 ? <ArrowUpRight className="h-3 w-3 text-green-500" /> : <ArrowDownRight className="h-3 w-3 text-red-500" />}
+              <p className="text-base text-muted-foreground flex items-center gap-1">
+                 {pnlChangeToday >= 0 ? <ArrowUpRight className="h-4 w-4 text-green-500" /> : <ArrowDownRight className="h-4 w-4 text-red-500" />}
                  <span className={pnlChangeToday >= 0 ? "text-green-500" : "text-red-500"}>
                     {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', signDisplay: "always" }).format(pnlChangeToday)}
                  </span>
@@ -376,7 +377,7 @@ const Index = () => {
               <div className={ `text-2xl font-bold ${totalPnL >= 0 ? 'text-green-500' : 'text-red-500'}` }>
                 {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', signDisplay: "always" }).format(totalPnL)}
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-base text-muted-foreground">
                  {totalReturnPct.toFixed(2)}% Return (Adj. for deposits)
               </p>
             </CardContent>
@@ -389,7 +390,7 @@ const Index = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{tradeStats?.activePositions || 0}</div>
-              <p className="text-xs text-muted-foreground">Open legs tracked</p>
+              <p className="text-base text-muted-foreground">Open legs tracked</p>
             </CardContent>
           </Card>
         </div>
