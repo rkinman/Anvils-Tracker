@@ -10,12 +10,13 @@ export interface ParsedPosition {
   pnl: number | null;
 }
 
-// Helper to sanitize and parse currency strings like "$1.23" or "($45.67)"
+// Helper to sanitize and parse currency strings like "$1,125.00", "-13.75", or "($45.67)"
 const sanitizeCurrency = (value: string | undefined): number => {
   if (!value) return 0;
   let sanitized = value.toString().trim();
   
-  const isNegative = sanitized.startsWith('(') && sanitized.endsWith(')');
+  // Handle parenthesis for negative values common in accounting
+  const isAccountingNegative = sanitized.startsWith('(') && sanitized.endsWith(')');
   
   // Remove non-numeric characters except for the decimal point and minus sign.
   // This will strip commas, quotes, dollar signs etc.
@@ -26,17 +27,17 @@ const sanitizeCurrency = (value: string | undefined): number => {
   // Ensure we always return a valid finite number
   if (isNaN(number) || !isFinite(number)) return 0;
   
-  return isNegative ? -Math.abs(number) : number;
+  return isAccountingNegative ? -Math.abs(number) : number;
 };
 
 // Parses complex option symbols from tastytrade into a standardized, comparable format.
 // Example Input: 'NVDA   241220C00140000' -> Output: 'NVDA:2024-12-20:140.00:C'
 // Example Input: './ESH6 EWF6  260130P5925' -> Output: './ESH6 EWF6:2026-01-30:5925.00:P'
 export const parseSymbolToCanonical = (symbol: string, type: string): string => {
-  console.log(`🔍 Parsing symbol: "${symbol}" of type: "${type}"`);
+  // console.log(`🔍 Parsing symbol: "${symbol}" of type: "${type}"`);
   
   if (type !== 'OPTION' && type !== 'FUTURES_OPTION') {
-    console.log(`✅ Stock symbol: ${symbol.trim()}`);
+    // console.log(`✅ Stock symbol: ${symbol.trim()}`);
     return symbol.trim();
   }
 
@@ -56,7 +57,7 @@ export const parseSymbolToCanonical = (symbol: string, type: string): string => 
   try {
     const [, underlying, dateStr, callPut, strikeStr] = optionMatch;
     
-    console.log(`📊 Parsed components: underlying=${underlying}, date=${dateStr}, type=${callPut}, strike=${strikeStr}`);
+    // console.log(`📊 Parsed components: underlying=${underlying}, date=${dateStr}, type=${callPut}, strike=${strikeStr}`);
     
     // Parse date: YYMMDD format
     const expDate = parse(dateStr, 'yyMMdd', new Date());
@@ -81,7 +82,7 @@ export const parseSymbolToCanonical = (symbol: string, type: string): string => 
     }
 
     const canonical = `${underlying}:${formattedDate}:${strike.toFixed(2)}:${callPut}`;
-    console.log(`✅ Canonical symbol: ${canonical}`);
+    // console.log(`✅ Canonical symbol: ${canonical}`);
     
     return canonical;
   } catch (e) {
@@ -95,31 +96,30 @@ export const parsePositionsCSV = (file: File): Promise<ParsedPosition[]> => {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
+      transformHeader: (header) => header.trim(), // Trim headers to avoid issues with extra spaces
       complete: (results) => {
         try {
-          console.log(`📋 Raw CSV data:`, results.data);
+          console.log(`📋 Raw CSV headers:`, results.meta.fields);
+          // console.log(`📋 Raw CSV data sample:`, results.data.slice(0, 2));
           
           const positions: ParsedPosition[] = (results.data as any[])
             .filter(row => {
+              // Ensure we have a symbol. Some exports might have summary rows.
               const hasSymbol = row.Symbol && row.Symbol.toString().trim() !== '';
-              console.log(`🔍 Row filter - Symbol: "${row.Symbol}", hasSymbol: ${hasSymbol}`);
               return hasSymbol;
             })
             .map((row: any) => {
-              console.log(`🔄 Processing row:`, row);
-              
               const type = row.Type?.toUpperCase() || 'STOCK';
               
-              // Handle various CSV headers for P&L and Mark
+              // Map headers based on the provided CSV format
+              // Priority given to 'P/L Open' as seen in the user's file
               const pnlRaw = row['P/L Open'] || row['Profit/Loss'] || row['Unrealized P&L'] || row['P&L'];
               const markRaw = row['Mark'] || row['Market Value'] || row['Current Price'] || row['Price'];
               const qtyRaw = row['Quantity'] || row['Qty'];
 
-              console.log(`📊 Raw values - P&L: "${pnlRaw}", Mark: "${markRaw}", Qty: "${qtyRaw}"`);
-
               // Parse PnL specially to preserve null if missing (vs 0)
               let pnl: number | null = null;
-              if (pnlRaw && pnlRaw.toString().trim() !== '') {
+              if (pnlRaw !== undefined && pnlRaw !== null && pnlRaw.toString().trim() !== '') {
                 pnl = sanitizeCurrency(pnlRaw);
               }
 
@@ -132,11 +132,10 @@ export const parsePositionsCSV = (file: File): Promise<ParsedPosition[]> => {
                 pnl
               };
               
-              console.log(`✅ Parsed position:`, position);
               return position;
             });
             
-          console.log(`🎉 Final positions array:`, positions);
+          console.log(`🎉 Final positions parsed: ${positions.length}`);
           resolve(positions);
         } catch (err) {
           console.error(`💥 Error parsing positions CSV:`, err);
