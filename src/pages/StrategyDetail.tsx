@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { showSuccess, showError } from "@/utils/toast";
-import { Loader2, Save, Plus, ArrowLeft, Search, Tag, Trash2, ChevronDown, ChevronRight, Calculator, Link as LinkIcon, ArrowUp, ArrowDown, ArrowUpDown, BarChart3, X, Pencil, Gauge } from "lucide-react";
+import { Loader2, Save, Plus, ArrowLeft, Search, Tag, Trash2, ChevronDown, ChevronRight, Calculator, Link as LinkIcon, ArrowUp, ArrowDown, ArrowUpDown, BarChart3, X, Pencil, Gauge, Settings, Calendar, DollarSign, Percent, TrendingUp } from "lucide-react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -23,6 +23,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { FloatingActionBar } from "@/components/FloatingActionBar";
 
@@ -110,6 +116,7 @@ export default function StrategyDetail() {
   const { strategyId } = useParams<{ strategyId: string }>();
   const queryClient = useQueryClient();
   const [isAddTradesOpen, setIsAddTradesOpen] = useState(false);
+  const [isEditStrategyOpen, setIsEditStrategyOpen] = useState(false);
   const [selectedUnassigned, setSelectedUnassigned] = useState<string[]>([]);
   const [selectedTradesForTagging, setSelectedTradesForTagging] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -146,6 +153,16 @@ export default function StrategyDetail() {
     }
   }, [strategy]);
 
+  const { data: benchmarkData } = useQuery({
+    queryKey: ['benchmark', strategy?.benchmark_ticker],
+    queryFn: async () => {
+        if (!strategy?.benchmark_ticker) return null;
+        const { data } = await supabase.from('benchmark_prices').select('*').eq('ticker', strategy.benchmark_ticker).order('date', { ascending: true });
+        return data;
+    },
+    enabled: !!strategy?.benchmark_ticker
+  });
+
   const { data: tags, isLoading: tagsLoading } = useQuery<Tag[]>({
     queryKey: ['tags', strategyId],
     queryFn: async () => {
@@ -167,7 +184,7 @@ export default function StrategyDetail() {
           )
         `)
         .eq('strategy_id', strategyId!)
-        .eq('hidden', false) // Filter out hidden trades to match Strategy card calculation
+        .eq('hidden', false)
         .order('date', { ascending: false });
       if (error) throw error;
       return data as Trade[];
@@ -177,13 +194,112 @@ export default function StrategyDetail() {
   const { data: unassignedTrades } = useQuery<Trade[]>({
     queryKey: ['unassignedTrades'],
     queryFn: async () => {
-      // Also filter hidden from unassigned to avoid confusion
       const { data, error } = await supabase.from('trades').select('*').is('strategy_id', null).eq('hidden', false).order('date', { ascending: false });
       if (error) throw error;
       return data;
     },
     enabled: isAddTradesOpen,
   });
+
+  // --- METRICS CALCULATION ---
+  const metrics = useMemo(() => {
+    if (!assignedTrades || !strategy) return null;
+
+    let total_pnl = 0;
+    let realized_pnl = 0;
+    let unrealized_pnl = 0;
+    let win_count = 0;
+    let loss_count = 0;
+    let open_count = 0;
+    let days_in_trade = 0;
+    let first_trade_date: string | null = null;
+    let last_trade_date: string | null = null;
+
+    const dates = assignedTrades.map(t => new Date(t.date).getTime()).filter(d => !isNaN(d));
+
+    if (dates.length > 0) {
+        const minDate = Math.min(...dates);
+        first_trade_date = new Date(minDate).toISOString().split('T')[0];
+        const maxDate = Math.max(...dates);
+        last_trade_date = new Date(maxDate).toISOString().split('T')[0];
+        
+        const endDate = strategy.status === 'closed' ? maxDate : Date.now();
+        const diffTime = Math.max(0, endDate - minDate);
+        days_in_trade = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        if (days_in_trade === 0) days_in_trade = 1;
+    }
+
+    assignedTrades.forEach(trade => {
+        let amount = Number(trade.amount) || 0;
+        const actionStr = trade.action ? trade.action.toUpperCase() : '';
+        const isBuy = actionStr.includes('BUY') || actionStr.includes('LONG');
+        const isShort = actionStr.includes('SELL') || actionStr.includes('SHORT');
+        
+        if (isBuy && amount > 0) amount = -amount;
+
+        if (trade.mark_price !== null && trade.mark_price !== undefined) {
+            open_count++;
+            const mark = Math.abs(Number(trade.mark_price));
+            const qty = Number(trade.quantity) || 0;
+            const mult = Number(trade.multiplier) || 1; 
+            const sign = isShort ? -1 : 1;
+            const marketValue = mark * qty * mult * sign;
+            const pnl = marketValue + amount;
+            unrealized_pnl += pnl;
+        } else {
+            const pnl = amount;
+            realized_pnl += pnl;
+            
+            // Loose approximation for win rate based on realized legs. 
+            // Ideally we'd group by trade chain.
+            if (pnl > 0) win_count++;
+            if (pnl < 0) loss_count++;
+        }
+    });
+    
+    total_pnl = realized_pnl + unrealized_pnl;
+
+    // Benchmark Calculation
+    let benchmarkPerformance = 0;
+    if (first_trade_date && benchmarkData && benchmarkData.length > 0) {
+      const stratPrices = benchmarkData;
+      
+      // Find start price
+      const startPriceObj = stratPrices.find((p: any) => p.date >= first_trade_date!);
+      
+      // Find end price
+      const endDateToCheck = strategy.status === 'closed' && last_trade_date 
+        ? last_trade_date 
+        : new Date().toISOString().split('T')[0];
+      
+      // Reverse find for end price (most recent before or on end date)
+      const endPriceObj = [...stratPrices].reverse().find((p: any) => p.date <= endDateToCheck);
+
+      if (startPriceObj && endPriceObj && Number(startPriceObj.price) > 0) {
+          const startP = Number(startPriceObj.price);
+          const endP = Number(endPriceObj.price);
+          benchmarkPerformance = ((endP - startP) / startP) * 100;
+      }
+    }
+
+    const capital = Number(strategy.capital_allocation) || 0;
+    const roi = capital > 0 ? (total_pnl / capital) * 100 : 0;
+    const total_closed = win_count + loss_count;
+    const win_rate = total_closed > 0 ? (win_count / total_closed) * 100 : 0;
+
+    return {
+        total_pnl,
+        realized_pnl,
+        unrealized_pnl,
+        days_in_trade,
+        open_count,
+        capital,
+        roi,
+        win_rate,
+        benchmarkPerformance,
+        benchmarkTicker: strategy.benchmark_ticker
+    };
+  }, [assignedTrades, strategy, benchmarkData]);
 
   // --- MUTATIONS ---
   const updateStrategyMutation = useMutation({
@@ -312,7 +428,11 @@ export default function StrategyDetail() {
   });
 
   // --- HANDLERS ---
-  const handleSave = () => updateStrategyMutation.mutate(formState);
+  const handleSave = () => {
+    updateStrategyMutation.mutate(formState);
+    setIsEditStrategyOpen(false);
+  };
+  
   const handleAddSelected = () => assignTradesMutation.mutate(selectedUnassigned);
   const handleCreateTag = () => {
     if (newTagName.trim()) createTagMutation.mutate(newTagName.trim());
@@ -379,7 +499,6 @@ export default function StrategyDetail() {
 
   const isFutures = useMemo(() => {
     if (!assignedTrades || assignedTrades.length === 0) return false;
-    // We consider it "Futures Mode" if ALL trades have multiplier 50.
     return assignedTrades.every(t => t.multiplier === 50);
   }, [assignedTrades]);
 
@@ -401,7 +520,6 @@ export default function StrategyDetail() {
   const groupedTradesByTag = useMemo(() => {
     if (!assignedTrades) return {};
 
-    // First sort trades
     const sortedTrades = [...assignedTrades].sort((a, b) => {
       let aValue: any = a[sortKey as keyof Trade];
       let bValue: any = b[sortKey as keyof Trade];
@@ -419,7 +537,6 @@ export default function StrategyDetail() {
       return 0;
     });
 
-    // Group by tag
     const groups: Record<string, { name: string; trades: TradeGroup[]; totalPnl: number }> = {};
 
     sortedTrades.forEach(trade => {
@@ -430,7 +547,6 @@ export default function StrategyDetail() {
         groups[tagId] = { name: tagName, trades: [], totalPnl: 0 };
       }
 
-      // Create trade groups (pairs vs singles)
       const groupId = trade.pair_id || trade.id;
       const isPair = !!trade.pair_id;
 
@@ -455,7 +571,6 @@ export default function StrategyDetail() {
       existingGroup.trades.push(trade);
     });
 
-    // Calculate summaries for each group
     Object.values(groups).forEach(tagGroup => {
       let tagTotalPnl = 0;
 
@@ -473,8 +588,6 @@ export default function StrategyDetail() {
           const isSell = actionUpper.includes('SELL') || actionUpper.includes('SHORT');
           const isBuy = actionUpper.includes('BUY') || actionUpper.includes('LONG');
           
-          // Re-calculate amount using Price * Qty * Multiplier to ensure correct sign (Polarity)
-          // DB 'amount' can sometimes be wrong if import didn't handle debit/credit signs correctly
           let amount = Number(trade.amount);
           
           if (isBuy && amount > 0) {
@@ -485,19 +598,15 @@ export default function StrategyDetail() {
 
           if (trade.mark_price !== null) {
             isOpen = true;
-            
             const cleanMarkPrice = Math.abs(trade.mark_price || 0);
             const sign = isSell ? -1 : 1;
-            
             const mv = cleanMarkPrice * trade.quantity * trade.multiplier * sign;
             totalMarketValue += mv;
             totalPnl += (mv + amount);
           } else {
-            // Closed Trade P&L is just the realized amount
             totalPnl += amount;
           }
           
-          // Update the trade object in memory so the expanded view uses the fixed sign too
           trade.amount = amount;
         });
 
@@ -524,17 +633,24 @@ export default function StrategyDetail() {
       });
 
       tagGroup.totalPnl = tagTotalPnl;
-      // Sort groups within each tag by date
       tagGroup.trades.sort((a, b) => new Date(b.summary.date).getTime() - new Date(a.summary.date).getTime());
     });
 
     return groups;
   }, [assignedTrades, sortKey, sortDirection]);
 
+  const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { 
+    style: 'currency', 
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(val);
+
   if (strategyLoading) return <DashboardLayout><Loader2 className="h-8 w-8 animate-spin mx-auto mt-10" /></DashboardLayout>;
 
   return (
     <DashboardLayout>
+      {/* Edit Trade Data Modal */}
       <Dialog open={!!editingTrade} onOpenChange={(open) => !open && setEditingTrade(null)}>
         <DialogContent>
            <DialogHeader>
@@ -569,43 +685,28 @@ export default function StrategyDetail() {
         </DialogContent>
       </Dialog>
 
-      <div className="space-y-6 pb-20">
-        <div className="flex items-center justify-between">
-          <Link to="/strategies" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" />Back to Strategies
-          </Link>
-          {strategy?.status === 'closed' && <Badge variant="secondary">Closed Strategy</Badge>}
-        </div>
-        
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Strategy Info Card */}
-          <div className="lg:col-span-2 space-y-6">
-            <Card>
-              <CardHeader><CardTitle>Strategy Details</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+      {/* Edit Strategy Settings Modal */}
+      <Dialog open={isEditStrategyOpen} onOpenChange={setIsEditStrategyOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Strategy Settings</DialogTitle>
+            <DialogDescription>Update strategy details, configuration, and tags.</DialogDescription>
+          </DialogHeader>
+          
+          <Tabs defaultValue="general" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="general">General</TabsTrigger>
+              <TabsTrigger value="tags">Tags & KPIs</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="general" className="space-y-4 py-4">
+               <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="name">Strategy Name</Label>
                     <Input id="name" value={formState.name} onChange={(e) => setFormState({ ...formState, name: e.target.value })} />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="cap">Allocated Capital</Label>
-                    <div className="relative">
-                      <Calculator className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input id="cap" type="number" className="pl-9" value={formState.capital_allocation} onChange={(e) => setFormState({ ...formState, capital_allocation: e.target.value })} />
-                    </div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                   <div className="space-y-2">
-                    <Label htmlFor="benchmark">Benchmark Ticker</Label>
-                     <div className="relative">
-                      <BarChart3 className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input id="benchmark" className="pl-9" value={formState.benchmark_ticker} onChange={(e) => setFormState({ ...formState, benchmark_ticker: e.target.value.toUpperCase() })} />
-                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="status">Strategy Status</Label>
+                    <Label htmlFor="status">Status</Label>
                     <div className="flex items-center space-x-2 h-10">
                       <Switch 
                         id="status" 
@@ -615,14 +716,32 @@ export default function StrategyDetail() {
                       <span className="text-sm text-muted-foreground">{formState.status === 'active' ? 'Active' : 'Closed'}</span>
                     </div>
                   </div>
-                </div>
-                <div className="space-y-2">
+               </div>
+               
+               <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="cap">Allocated Capital</Label>
+                    <div className="relative">
+                      <Calculator className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input id="cap" type="number" className="pl-9" value={formState.capital_allocation} onChange={(e) => setFormState({ ...formState, capital_allocation: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="benchmark">Benchmark Ticker</Label>
+                     <div className="relative">
+                      <BarChart3 className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input id="benchmark" className="pl-9" value={formState.benchmark_ticker} onChange={(e) => setFormState({ ...formState, benchmark_ticker: e.target.value.toUpperCase() })} />
+                     </div>
+                  </div>
+               </div>
+
+               <div className="space-y-2">
                   <Label htmlFor="description">Description</Label>
                   <Textarea id="description" value={formState.description} onChange={(e) => setFormState({ ...formState, description: e.target.value })} />
-                </div>
+               </div>
 
                 <div className="pt-2 border-t mt-4">
-                  <Label className="mb-2 block">Data Overrides</Label>
+                  <Label className="mb-2 block">Advanced</Label>
                   <div className="flex items-center space-x-2">
                     <Switch 
                       id="futures-mode" 
@@ -632,35 +751,22 @@ export default function StrategyDetail() {
                     />
                     <div className="space-y-0.5">
                       <Label htmlFor="futures-mode" className="text-base cursor-pointer">Futures Strategy (50x)</Label>
-                      <p className="text-xs text-muted-foreground">Force all trade multipliers to 50 (standard for ES/NQ/etc).</p>
+                      <p className="text-xs text-muted-foreground">Force all trade multipliers to 50.</p>
                     </div>
                   </div>
                 </div>
-
-              </CardContent>
-              <CardFooter>
-                <Button onClick={handleSave} disabled={updateStrategyMutation.isPending}>
-                  <Save className="mr-2 h-4 w-4" />Save Changes
-                </Button>
-              </CardFooter>
-            </Card>
-          </div>
-          
-          {/* Tags Card */}
-          <Card className="flex flex-col">
-            <CardHeader>
-              <CardTitle>Tags & KPIs</CardTitle>
-              <CardDescription>Tags marked "Show on Dashboard" act as sub-metrics.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1">
+            </TabsContent>
+            
+            <TabsContent value="tags" className="space-y-4 py-4">
               <div className="flex gap-2 mb-4">
                 <Input placeholder="New tag name..." value={newTagName} onChange={(e) => setNewTagName(e.target.value)} />
                 <Button onClick={handleCreateTag} disabled={createTagMutation.isPending}><Plus className="h-4 w-4" /></Button>
               </div>
-              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
-                {tagsLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 border rounded-md p-2">
+                {tagsLoading && <Loader2 className="h-4 w-4 animate-spin mx-auto" />}
+                {!tagsLoading && tags?.length === 0 && <p className="text-center text-muted-foreground text-sm">No tags created yet.</p>}
                 {tags?.map(tag => (
-                  <div key={tag.id} className="flex items-center justify-between p-3 rounded-md bg-muted/40 border">
+                  <div key={tag.id} className="flex items-center justify-between p-2 rounded-md bg-muted/40 border">
                     <div className="flex items-center gap-2">
                       <Tag className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium text-sm">{tag.name}</span>
@@ -681,21 +787,33 @@ export default function StrategyDetail() {
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            </TabsContent>
+          </Tabs>
 
-        {/* TRADES / POSITIONS TABLE */}
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <div>
-              <CardTitle>Trades & Positions</CardTitle>
-              <CardDescription>
-                Grouped by tags. Expand to see leg details and P&L.
-              </CardDescription>
+          <DialogFooter>
+             <Button variant="outline" onClick={() => setIsEditStrategyOpen(false)}>Cancel</Button>
+             <Button onClick={handleSave} disabled={updateStrategyMutation.isPending}>Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <div className="space-y-6 pb-20">
+        {/* Header Section */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <Link to="/strategies" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-1">
+              <ArrowLeft className="h-3 w-3" />Back to Strategies
+            </Link>
+            <div className="flex items-center gap-3">
+               <h2 className="text-3xl font-bold tracking-tight">{strategy?.name}</h2>
+               {strategy?.status === 'closed' && <Badge variant="secondary">Closed</Badge>}
             </div>
-            <div className="flex gap-2">
-              <Dialog open={isAddTradesOpen} onOpenChange={setIsAddTradesOpen}>
+          </div>
+          <div className="flex items-center gap-2">
+             <Button variant="outline" onClick={() => setIsEditStrategyOpen(true)}>
+                <Settings className="mr-2 h-4 w-4" /> Edit Strategy
+             </Button>
+             <Dialog open={isAddTradesOpen} onOpenChange={setIsAddTradesOpen}>
                 <DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4" /> Add Trades</Button></DialogTrigger>
                 <DialogContent className="max-w-3xl">
                    <DialogHeader>
@@ -743,6 +861,82 @@ export default function StrategyDetail() {
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+          </div>
+        </div>
+        
+        {/* Performance Stats Banner */}
+        {metrics && (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total P&L</CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className={cn("text-2xl font-bold", metrics.total_pnl >= 0 ? "text-green-500" : "text-red-500")}>
+                   {formatCurrency(metrics.total_pnl)}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                   {formatCurrency(metrics.realized_pnl)} realized
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">ROI</CardTitle>
+                <Percent className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className={cn("text-2xl font-bold", metrics.roi >= 0 ? "text-green-500" : "text-red-500")}>
+                   {metrics.roi > 0 ? '+' : ''}{metrics.roi.toFixed(1)}%
+                </div>
+                 <div className="flex items-center text-xs text-muted-foreground mt-1 gap-1">
+                   <BarChart3 className="h-3 w-3" />
+                   {metrics.benchmarkTicker || 'SPY'}: 
+                   <span className={cn(metrics.benchmarkPerformance >= 0 ? "text-green-500" : "text-red-500", "ml-1")}>
+                      {metrics.benchmarkPerformance > 0 ? '+' : ''}{metrics.benchmarkPerformance.toFixed(1)}%
+                   </span>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Win Rate</CardTitle>
+                <Gauge className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{metrics.win_rate.toFixed(0)}%</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  On realized legs
+                </p>
+              </CardContent>
+            </Card>
+
+             <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Activity</CardTitle>
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{metrics.days_in_trade} Days</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {metrics.open_count} open positions
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* TRADES / POSITIONS TABLE */}
+        <Card className="flex-1">
+          <CardHeader className="flex-row items-center justify-between">
+            <div>
+              <CardTitle>Trades & Positions</CardTitle>
+              <CardDescription>
+                Grouped by tags. Expand to see leg details and P&L.
+              </CardDescription>
             </div>
           </CardHeader>
           <CardContent>
@@ -755,14 +949,14 @@ export default function StrategyDetail() {
 
                   return (
                   <div key={tagId}>
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-xl font-semibold text-primary/90 flex items-center gap-2">
-                        <Tag className="h-5 w-5" />
+                    <div className="flex items-center justify-between mb-3 bg-muted/20 p-2 rounded-lg border-l-4 border-primary">
+                      <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                        <Tag className="h-4 w-4" />
                         {tagGroup.name} 
                         <span className="text-muted-foreground text-sm font-normal ml-1">({tagGroup.trades.length} positions)</span>
                       </h3>
                       <div className={cn("text-lg font-bold font-mono", tagGroup.totalPnl >= 0 ? "text-green-600" : "text-red-600")}>
-                        {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(tagGroup.totalPnl)}
+                        {formatCurrency(tagGroup.totalPnl)}
                       </div>
                     </div>
                     <div className="border rounded-md overflow-hidden">
@@ -830,13 +1024,13 @@ export default function StrategyDetail() {
                                   }
                                 </TableCell>
                                 <TableCell className="text-right text-muted-foreground">
-                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(group.summary.totalAmount)}
+                                    {formatCurrency(group.summary.totalAmount)}
                                 </TableCell>
                                 <TableCell className="text-right font-mono">
-                                    {group.summary.isOpen ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(group.summary.totalMarketValue) : '-'}
+                                    {group.summary.isOpen ? formatCurrency(group.summary.totalMarketValue) : '-'}
                                 </TableCell>
                                 <TableCell className={cn("text-right font-bold", group.summary.totalPnl >= 0 ? "text-green-500" : "text-red-500")}>
-                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(group.summary.totalPnl)}
+                                    {formatCurrency(group.summary.totalPnl)}
                                 </TableCell>
                                 <TableCell className="min-w-[200px]" onClick={(e) => e.stopPropagation()}>
                                   <Select 
@@ -906,7 +1100,7 @@ export default function StrategyDetail() {
                                                             {trade.mark_price ? `$${cleanMarkPrice.toFixed(2)}` : '-'}
                                                         </TableCell>
                                                         <TableCell className={cn("text-xs text-right font-bold", legPnl >= 0 ? "text-green-600/70" : "text-red-600/70")}>
-                                                            {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(legPnl)}
+                                                            {formatCurrency(legPnl)}
                                                         </TableCell>
                                                         <TableCell>
                                                           <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover/row:opacity-100 transition-opacity" onClick={() => handleEditTrade(trade)}>
