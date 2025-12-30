@@ -397,13 +397,10 @@ export default function PutCamp() {
             <p className="text-muted-foreground">Tracking for Short Put campaigns.</p>
           </div>
           {metrics && (
-             <div className="text-right flex flex-col items-end">
-                <div className="text-sm text-muted-foreground flex items-center gap-1">
+             <div className="text-right">
+                <div className="text-sm text-muted-foreground flex items-center gap-1 justify-end">
                    <CalendarDays className="h-3 w-3" />
                    Active for {metrics.daysSinceStart} days
-                </div>
-                <div className={cn("text-2xl font-bold", metrics.annualizedROR >= 0 ? "text-green-500" : "text-red-500")}>
-                   {metrics.annualizedROR > 0 ? '+' : ''}{metrics.annualizedROR.toFixed(2)}% <span className="text-sm font-medium">ANNUALIZED</span>
                 </div>
              </div>
           )}
@@ -448,7 +445,13 @@ export default function PutCamp() {
                <MetricBox label="Avg DIT" value={metrics.avgDIT.toFixed(1)} />
                <MetricBox label="Net LIQ DD" value={`${metrics.netLiqDD.toFixed(2)}%`} />
                <MetricBox label="Annual ROR" value={`${metrics.annualizedROR.toFixed(2)}%`} className={metrics.annualizedROR >= 0 ? "text-green-500" : "text-red-500"} />
-               <MetricBox label="" value="" className="flex-1 bg-muted/50" /> 
+               <div className="bg-card p-2 flex flex-col justify-center h-[121px] flex-1">
+                  <span className="text-[10px] uppercase font-semibold text-muted-foreground mb-1">Annualized Profit</span>
+                  <div className={cn("text-2xl font-bold font-mono", metrics.annualizedROR >= 0 ? "text-green-500" : "text-red-500")}>
+                     {metrics.annualizedROR > 0 ? '+' : ''}{metrics.annualizedROR.toFixed(2)}%
+                  </div>
+                  <span className="text-[10px] font-semibold text-muted-foreground mt-0.5">ANNUALIZED</span>
+               </div>
             </div>
           </div>
         )}
