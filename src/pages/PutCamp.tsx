@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, TrendingUp, AlertCircle, ChevronDown, ChevronRight, Pencil, Link as LinkIcon } from "lucide-react";
+import { Loader2, TrendingUp, AlertCircle, ChevronDown, ChevronRight, Pencil, Link as LinkIcon, CalendarDays } from "lucide-react";
 import { format, differenceInCalendarDays, parse } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
@@ -58,7 +58,6 @@ interface TradeGroup {
 
 // --- Helpers ---
 
-// Helper to parse option symbols for Strike and Expiration
 const parseOptionDetails = (symbol: string) => {
   try {
     const clean = symbol.trim().toUpperCase();
@@ -103,7 +102,6 @@ export default function PutCamp() {
   const [isEditNetLiqOpen, setIsEditNetLiqOpen] = useState(false);
   const [newNetLiq, setNewNetLiq] = useState("");
 
-  // 1. Fetch the 'Put Camp' strategy
   const { data: strategy } = useQuery({
     queryKey: ['strategy-put-camp'],
     queryFn: async () => {
@@ -118,7 +116,6 @@ export default function PutCamp() {
     }
   });
 
-  // 2. Fetch trades
   const { data: trades, isLoading } = useQuery({
     queryKey: ['trades-put-camp', strategy?.id],
     queryFn: async () => {
@@ -154,7 +151,6 @@ export default function PutCamp() {
     onError: (err) => showError(err.message)
   });
 
-  // 3. Process Trades into Groups (Positions)
   const groups = useMemo(() => {
     if (!trades) return [];
 
@@ -206,7 +202,6 @@ export default function PutCamp() {
         const amount = Number(trade.amount); 
         totalAmount += amount;
         
-        // Sum all positive amounts as total potential credit
         if (amount > 0) initialCredit += amount;
 
         if (trade.mark_price !== null) {
@@ -244,7 +239,6 @@ export default function PutCamp() {
   }, [trades]);
 
 
-  // 4. Calculate Grid Metrics
   const metrics = useMemo(() => {
     if (!strategy || groups.length === 0) return null;
 
@@ -329,6 +323,13 @@ export default function PutCamp() {
        if (ddPct > maxDD) maxDD = ddPct;
     });
 
+    // Annualized Rate of Return Calculation
+    // Formula: =(RunningPL / (Today - StartDate) * 365) / (NetLiq - RunningPL)
+    const startDate = new Date([...groups].sort((a, b) => new Date(a.summary.openDate).getTime() - new Date(b.summary.openDate).getTime())[0].summary.openDate);
+    const daysSinceStart = Math.max(1, differenceInCalendarDays(new Date(), startDate));
+    const initialCapital = netLiq - runningPnl;
+    const annualizedROR = initialCapital > 0 ? ((runningPnl / daysSinceStart) * 365) / initialCapital * 100 : 0;
+
     return {
        totalTrades, totalClosed, totalOpen,
        totalWins, totalLosses, winRate,
@@ -337,7 +338,9 @@ export default function PutCamp() {
        avgCredit, avgWinner, avgLoser,
        avgDTE, avgDIT,
        netLiqDD: maxDD * 100,
-       allocatedCap
+       allocatedCap,
+       annualizedROR,
+       daysSinceStart
     };
   }, [groups, strategy]);
 
@@ -388,9 +391,22 @@ export default function PutCamp() {
   return (
     <DashboardLayout>
       <div className="space-y-6 pb-20">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">Put Camp</h2>
-          <p className="text-muted-foreground">Tracking for Short Put campaigns.</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight">Put Camp</h2>
+            <p className="text-muted-foreground">Tracking for Short Put campaigns.</p>
+          </div>
+          {metrics && (
+             <div className="text-right flex flex-col items-end">
+                <div className="text-sm text-muted-foreground flex items-center gap-1">
+                   <CalendarDays className="h-3 w-3" />
+                   Active for {metrics.daysSinceStart} days
+                </div>
+                <div className={cn("text-2xl font-bold", metrics.annualizedROR >= 0 ? "text-green-500" : "text-red-500")}>
+                   {metrics.annualizedROR > 0 ? '+' : ''}{metrics.annualizedROR.toFixed(2)}% <span className="text-sm font-medium">ANNUALIZED</span>
+                </div>
+             </div>
+          )}
         </div>
 
         {metrics && (
@@ -431,6 +447,7 @@ export default function PutCamp() {
                <MetricBox label="Avg DTE" value={metrics.avgDTE.toFixed(1)} />
                <MetricBox label="Avg DIT" value={metrics.avgDIT.toFixed(1)} />
                <MetricBox label="Net LIQ DD" value={`${metrics.netLiqDD.toFixed(2)}%`} />
+               <MetricBox label="Annual ROR" value={`${metrics.annualizedROR.toFixed(2)}%`} className={metrics.annualizedROR >= 0 ? "text-green-500" : "text-red-500"} />
                <MetricBox label="" value="" className="flex-1 bg-muted/50" /> 
             </div>
           </div>
@@ -537,8 +554,6 @@ const TradeGroupTable = ({ groups, expanded, toggle, formatMoney }: any) => {
          <TableBody>
             {groups.map((group: TradeGroup) => {
                const isExpanded = expanded.has(group.id);
-               // Calculate % of credit captured (P&L / Max Potential Profit)
-               // Max Potential = Sum of all credits (initialCredit)
                const pctCaptured = group.summary.initialCredit > 0 
                   ? (group.summary.totalPnl / group.summary.initialCredit) * 100 
                   : 0;
