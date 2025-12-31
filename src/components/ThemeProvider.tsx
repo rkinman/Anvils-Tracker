@@ -3,22 +3,9 @@ import { createContext, useContext, useEffect, useState } from "react";
 type Theme = 
   | "dark" 
   | "light" 
-  | "cyberpunk" 
-  | "neon" 
-  | "deep-space"
-  | "sunset"
-  | "forest"
-  | "ocean"
   | "midnight"
-  | "terminal"
-  | "dracula"
-  | "tron"
   | "tasty"
-  | "aurora"
-  | "coffee"
-  | "nord"
   | "luxury"
-  | "pastel"
   | "legend"
   | "christmas";
 
@@ -52,11 +39,9 @@ export function ThemeProvider({
   useEffect(() => {
     const root = window.document.documentElement;
 
-    // Remove old theme classes
+    // Remove old theme classes - only need to remove the ones we support now
     root.classList.remove(
-      "light", "dark", "cyberpunk", "neon", "deep-space",
-      "sunset", "forest", "ocean", "midnight", "terminal", "dracula",
-      "tron", "tasty", "aurora", "coffee", "nord", "luxury", "pastel", "legend", "christmas"
+      "light", "dark", "midnight", "tasty", "luxury", "legend", "christmas"
     );
 
     // Add new theme class
