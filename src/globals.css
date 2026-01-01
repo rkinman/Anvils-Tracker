@@ -58,16 +58,16 @@
     --popover-foreground: 160 50% 10%;
     --primary: 160 84% 39%; /* Bloomberg Teal */
     --primary-foreground: 0 0% 100%;
-    --secondary: 160 20% 90%;
+    --secondary: 160 20% 88%;
     --secondary-foreground: 160 50% 10%;
-    --muted: 160 20% 94%;
-    --muted-foreground: 160 20% 40%;
-    --accent: 160 20% 90%;
+    --muted: 160 15% 90%;
+    --muted-foreground: 160 20% 35%;
+    --accent: 160 20% 88%;
     --accent-foreground: 160 84% 39%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 160 20% 88%;
-    --input: 160 20% 88%;
+    --border: 160 15% 82%;
+    --input: 160 15% 82%;
     --ring: 160 84% 39%;
   }
 
