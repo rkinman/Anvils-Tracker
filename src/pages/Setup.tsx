@@ -216,9 +216,9 @@ export default function Setup() {
             {/* --- STEP 3: BENCHMARKING --- */}
             {step === "benchmark" && (
               <div className="space-y-6">
-                <div className="p-3 bg-purple-500/5 border border-purple-500/10 rounded-lg">
+                <div className="p-3 bg-fuchsia-500/5 border border-fuchsia-500/10 rounded-lg">
                   <h4 className="font-semibold text-sm flex items-center gap-2 mb-2">
-                    <TrendingUp className="h-4 w-4 text-purple-500" />
+                    <TrendingUp className="h-4 w-4 text-fuchsia-500" />
                     Benchmark Tracking (Optional)
                   </h4>
                   <p className="text-xs text-muted-foreground leading-relaxed">
@@ -227,31 +227,43 @@ export default function Setup() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-start gap-4">
                     <div className="h-6 w-6 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</div>
                     <div className="space-y-2 flex-1">
-                      <p className="text-sm font-medium">Automatic Deployment (Recommended)</p>
-                      <p className="text-xs text-muted-foreground mb-3">Run this command in your terminal if you have the Supabase CLI installed.</p>
-                      <div className="bg-muted p-3 rounded font-mono text-[11px] flex justify-between items-center group">
-                        <code className="text-primary truncate mr-2">supabase functions deploy fetch-benchmarks</code>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => {
-                          navigator.clipboard.writeText("supabase functions deploy fetch-benchmarks");
-                          toast.success("Command copied!");
+                      <p className="text-sm font-medium">Create Function</p>
+                      <p className="text-xs text-muted-foreground">
+                        Go to <strong>Edge Functions</strong> in Supabase and click <strong>Create a new function</strong>.
+                      </p>
+                      <div className="bg-muted/50 p-3 rounded border flex justify-between items-center group mt-2">
+                        <div className="text-[11px]">
+                          <span className="text-muted-foreground block uppercase text-[9px] font-bold mb-0.5">Function Name</span>
+                          <code className="text-primary font-bold text-sm">fetch-benchmarks</code>
+                        </div>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => {
+                          navigator.clipboard.writeText("fetch-benchmarks");
+                          toast.success("Name copied!");
                         }}>
-                          <Copy className="h-3 w-3" />
+                          <Copy className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-start gap-4">
                     <div className="h-6 w-6 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</div>
                     <div className="space-y-2 flex-1">
-                      <p className="text-sm font-medium">Manual Copy (Fallback)</p>
-                      <p className="text-xs text-muted-foreground">If you can't use the CLI, you can copy the code below. Note: Edge Functions cannot be created directly in the Supabase Dashboard UI yet.</p>
-                      <Button variant="outline" size="sm" onClick={copyEdgeFunction} className="w-full mt-2">
-                        <Copy className="mr-2 h-4 w-4" /> Copy Function Code
-                      </Button>
+                      <p className="text-sm font-medium">Paste Code</p>
+                      <p className="text-xs text-muted-foreground">
+                        Click <strong>Open Editor</strong> inside the function settings and paste the code from below.
+                      </p>
+                      <div className="grid grid-cols-2 gap-3 mt-3">
+                        <Button variant="default" onClick={copyEdgeFunction} className="w-full">
+                          <Copy className="mr-2 h-4 w-4" /> Copy Code
+                        </Button>
+                        <Button variant="outline" onClick={() => window.open('https://supabase.com/dashboard/project/_/functions', '_blank')} className="w-full">
+                          Open Functions <ExternalLink className="ml-2 h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
