@@ -343,13 +343,53 @@ export default function Setup() {
 
             {/* --- STEP 4: FINISH --- */}
             {step === "finish" && (
-              <div className="space-y-6 py-6 text-center">
+              <div className="space-y-6 py-4 text-center">
                 <div className="mx-auto w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
                   <CheckCircle className="h-8 w-8 text-green-600 dark:text-green-400" />
                 </div>
                 <div className="space-y-2">
                   <h3 className="text-xl font-semibold">Setup Complete!</h3>
-                  <p className="text-muted-foreground">Your trading journal is fully configured and ready.</p>
+                  <p className="text-muted-foreground text-sm">One last step to never be asked for these keys again.</p>
+                </div>
+
+                <div className="mt-6 p-5 bg-purple-500/5 border border-purple-500/20 rounded-xl text-left space-y-4 max-w-md mx-auto">
+                  <div className="flex items-center gap-2 text-primary font-semibold">
+                    <Key className="h-5 w-5" />
+                    <span>Save to Vercel</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3">
+                      <div className="h-5 w-5 rounded-full bg-purple-500/20 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</div>
+                      <p className="text-xs text-muted-foreground">Go to your <strong className="text-foreground">Vercel Dashboard</strong> and select this project.</p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-5 w-5 rounded-full bg-purple-500/20 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</div>
+                      <p className="text-xs text-muted-foreground">Navigate to <strong className="text-foreground">Settings → Environment Variables</strong>.</p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-5 w-5 rounded-full bg-purple-500/20 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</div>
+                      <div className="text-xs text-muted-foreground">
+                        <p className="mb-1">Add these two variables:</p>
+                        <div className="bg-background/50 p-2 rounded border font-mono text-[10px] space-y-1">
+                          <div><span className="text-purple-500">VITE_SUPABASE_URL</span></div>
+                          <div><span className="text-purple-500">VITE_SUPABASE_ANON_KEY</span></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="h-5 w-5 rounded-full bg-purple-500/20 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</div>
+                      <p className="text-xs text-muted-foreground">Click <strong className="text-foreground">Redeploy</strong> for changes to take effect.</p>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    className="w-full text-xs h-9"
+                    onClick={() => window.open('https://vercel.com/dashboard', '_blank')}
+                  >
+                    Open Vercel Dashboard <ExternalLink className="ml-2 h-3 w-3" />
+                  </Button>
                 </div>
               </div>
             )}
@@ -401,7 +441,7 @@ export default function Setup() {
           </CardFooter>
         </Card>
       </div>
-    </div>
+    </div >
   );
 }
 

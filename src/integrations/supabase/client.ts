@@ -6,6 +6,10 @@ import { createClient } from '@supabase/supabase-js';
 // 3. Fallback (Prevents crash before setup)
 
 const getSupabaseConfig = () => {
+  // 1. Environment Variables (Highest Priority)
+  // Recommended for persistence: Create a .env file in the project root with:
+  // VITE_SUPABASE_URL=your_url
+  // VITE_SUPABASE_ANON_KEY=your_key
   const envUrl = import.meta.env.VITE_SUPABASE_URL;
   const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -20,10 +24,10 @@ const getSupabaseConfig = () => {
     return { url: localUrl, key: localKey, isConfigured: true };
   }
 
-  return { 
-    url: 'https://placeholder.supabase.co', 
+  return {
+    url: 'https://placeholder.supabase.co',
     key: 'placeholder',
-    isConfigured: false 
+    isConfigured: false
   };
 };
 
@@ -37,6 +41,6 @@ export const supabase = createClient(url, key, {
   }
 });
 
-export const isSupabaseConfigured = () => isConfigured; 
+export const isSupabaseConfigured = () => isConfigured;
 
 
