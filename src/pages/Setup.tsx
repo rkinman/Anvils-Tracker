@@ -269,15 +269,31 @@ export default function Setup() {
 
                   <div className="flex items-start gap-4">
                     <div className="h-6 w-6 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</div>
-                    <div className="space-y-2 flex-1">
-                      <p className="text-sm font-medium">Configure Settings (Important)</p>
-                      <p className="text-xs text-muted-foreground">
-                        In the function <strong>Settings</strong> tab:
-                      </p>
-                      <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1 mt-1">
-                        <li><strong>Disable</strong> the "Enforce JWT" toggle (we handle auth in code).</li>
-                        <li>Go to <strong>Secrets</strong> and add <code className="text-primary">SUPABASE_SERVICE_ROLE_KEY</code>.</li>
-                      </ul>
+                    <div className="space-y-4 flex-1">
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Configure Settings (Important)</p>
+                        <p className="text-xs text-muted-foreground">
+                          In the function <strong>Settings</strong> tab:
+                        </p>
+                      </div>
+
+                      <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg space-y-2">
+                        <p className="text-[11px] font-bold text-yellow-600 flex items-center gap-1.5 uppercase">
+                          <AlertCircle className="h-3 w-3" /> Required Configuration
+                        </p>
+                        <ul className="text-xs text-muted-foreground list-disc list-inside space-y-2">
+                          <li>
+                            <strong>Turn OFF "Enforce JWT Verification"</strong>
+                            <p className="ml-5 mt-0.5 text-[10px] leading-relaxed">This must be disabled because the app handles its own secure authentication within the function code.</p>
+                          </li>
+                          <li>
+                            <strong>Enable "Secrets"</strong> and add:
+                            <div className="ml-5 mt-1">
+                              <code className="text-primary font-bold">SUPABASE_SERVICE_ROLE_KEY</code>
+                            </div>
+                          </li>
+                        </ul>
+                      </div>
                     </div>
                   </div>
                 </div>

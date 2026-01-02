@@ -62,6 +62,11 @@ The Setup Wizard will guide you through this final step. You'll need to update t
 3.  **Redirect URLs**: Add your Vercel URL followed by `/**`.
 
 Now you can sign up and log in securely!
- 
 
+### 4. Benchmarking (Optional)
 
+To compare your trades against benchmarks like SPY or QQQ:
+1.  Follow the **Benchmark** step in the Setup Wizard to create an Edge Function in your Supabase dashboard.
+2.  **Crucial:** In the function settings, you **must disable "Enforce JWT Verification"** and provide your `SUPABASE_SERVICE_ROLE_KEY` in the function's **Secrets** tab.
+
+This allows the tracker to securely fetch market data without authentication conflicts.
