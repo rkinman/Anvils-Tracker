@@ -10,13 +10,13 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   CheckCircle, AlertCircle, Database, Server, Key, Loader2,
-  Copy, ExternalLink, ArrowRight, Terminal, Sparkles, Wrench
+  Copy, ExternalLink, ArrowRight, Terminal, Sparkles, Wrench, TrendingUp
 } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { toast } from "sonner";
-import { fetchSchemaContent } from "@/utils/setupHelpers";
+import { fetchSchemaContent, fetchEdgeFunctionCode } from "@/utils/setupHelpers";
 
-type Step = "credentials" | "schema" | "auth" | "finish";
+type Step = "credentials" | "schema" | "benchmark" | "auth" | "finish";
 
 export default function Setup() {
   const [url, setUrl] = useState("");
@@ -83,6 +83,16 @@ export default function Setup() {
     }
   };
 
+  const copyEdgeFunction = async () => {
+    try {
+      const text = await fetchEdgeFunctionCode();
+      await navigator.clipboard.writeText(text);
+      toast.success("Edge Function code copied!");
+    } catch (e) {
+      toast.error("Failed to load function code.");
+    }
+  };
+
   // --- Main Setup Form ---
 
   return (
@@ -98,9 +108,11 @@ export default function Setup() {
               ? "Let's connect to your database."
               : step === "schema"
                 ? "Initialize the database tables."
-                : step === "auth"
-                  ? "Configure authentication redirects."
-                  : "You are ready to go!"}
+                : step === "benchmark"
+                  ? "Install the benchmarking function."
+                  : step === "auth"
+                    ? "Configure authentication redirects."
+                    : "You are ready to go!"}
           </p>
         </div>
 
@@ -108,7 +120,7 @@ export default function Setup() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Server className="h-5 w-5 text-primary" />
-              {step === "credentials" ? "1. Connection Details" : step === "schema" ? "2. Run SQL Migration" : step === "auth" ? "3. Auth Configuration" : "Complete"}
+              {step === "credentials" ? "1. Connection" : step === "schema" ? "2. Database" : step === "benchmark" ? "3. Benchmarking" : step === "auth" ? "4. Auth" : "Complete"}
             </CardTitle>
           </CardHeader>
 
@@ -201,6 +213,51 @@ export default function Setup() {
               </div>
             )}
 
+            {/* --- STEP 3: BENCHMARKING --- */}
+            {step === "benchmark" && (
+              <div className="space-y-6">
+                <div className="p-3 bg-purple-500/5 border border-purple-500/10 rounded-lg">
+                  <h4 className="font-semibold text-sm flex items-center gap-2 mb-2">
+                    <TrendingUp className="h-4 w-4 text-purple-500" />
+                    Benchmark Tracking (Optional)
+                  </h4>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Compare your performance against SPY, QQQ, etc. This requires a Supabase Edge Function to fetch market data.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="h-6 w-6 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</div>
+                    <div className="space-y-2 flex-1">
+                      <p className="text-sm font-medium">Automatic Deployment (Recommended)</p>
+                      <p className="text-xs text-muted-foreground mb-3">Run this command in your terminal if you have the Supabase CLI installed.</p>
+                      <div className="bg-muted p-3 rounded font-mono text-[11px] flex justify-between items-center group">
+                        <code className="text-primary truncate mr-2">supabase functions deploy fetch-benchmarks</code>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => {
+                          navigator.clipboard.writeText("supabase functions deploy fetch-benchmarks");
+                          toast.success("Command copied!");
+                        }}>
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="h-6 w-6 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</div>
+                    <div className="space-y-2 flex-1">
+                      <p className="text-sm font-medium">Manual Copy (Fallback)</p>
+                      <p className="text-xs text-muted-foreground">If you can't use the CLI, you can copy the code below. Note: Edge Functions cannot be created directly in the Supabase Dashboard UI yet.</p>
+                      <Button variant="outline" size="sm" onClick={copyEdgeFunction} className="w-full mt-2">
+                        <Copy className="mr-2 h-4 w-4" /> Copy Function Code
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* --- STEP 3: AUTH REDIRECTS --- */}
             {step === "auth" && (
               <div className="space-y-5">
@@ -261,7 +318,8 @@ export default function Setup() {
             {step !== "credentials" && step !== "finish" ? (
               <Button variant="ghost" onClick={() => {
                 if (step === "schema") setStep("credentials");
-                if (step === "auth") setStep("schema");
+                if (step === "benchmark") setStep("schema");
+                if (step === "auth") setStep("benchmark");
               }}>
                 Back
               </Button>
@@ -276,8 +334,14 @@ export default function Setup() {
             )}
 
             {step === "schema" && (
+              <Button onClick={() => setStep("benchmark")} className="px-8 transition-all active:scale-95">
+                Next: Benchmarking
+              </Button>
+            )}
+
+            {step === "benchmark" && (
               <Button onClick={() => setStep("auth")} className="px-8 transition-all active:scale-95">
-                Next: Configuration
+                Next: Final Config
               </Button>
             )}
 
