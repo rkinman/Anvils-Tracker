@@ -38,3 +38,5 @@ export const supabase = createClient(url, key, {
 });
 
 export const isSupabaseConfigured = () => isConfigured; 
+
+

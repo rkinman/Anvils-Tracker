@@ -125,3 +125,5 @@ export function DashboardChart({ data, showBenchmark }: DashboardChartProps) {
     </div>
   );
 } 
+
+

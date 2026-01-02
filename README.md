@@ -55,13 +55,13 @@ Once deployed, visit your new site URL. You will be automatically redirected to 
 
 ### 3. Configure Authentication (Important!)
 
-To make sure login and email confirmations work correctly (and don't redirect to `localhost`), you need to update one setting in Supabase.
+The Setup Wizard will guide you through this final step. You'll need to update the **URL Configuration** in Supabase so that login and email confirmations redirect to your Vercel URL instead of `localhost`.
 
-1.  Go to your Supabase Project Dashboard.
-2.  Navigate to **Authentication** -> **URL Configuration**.
-3.  **Site URL**: Set this to your Vercel deployment URL (e.g., `https://your-app-name.vercel.app`).
-4.  **Redirect URLs**: Add your Vercel URL here as well (e.g., `https://your-app-name.vercel.app/**`).
-5.  Click **Save**.
+1.  Go to your Supabase **Authentication** -> **URL Configuration**.
+2.  **Site URL**: Set this to your Vercel URL.
+3.  **Redirect URLs**: Add your Vercel URL followed by `/**`.
 
 Now you can sign up and log in securely!
  
+
+

@@ -191,3 +191,5 @@ export const parseTradeCSV = (file: File): Promise<ParsedTrade[]> => {
     });
   });
 }; 
+
+
